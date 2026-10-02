@@ -5,24 +5,28 @@ using System.Text.RegularExpressions;
 namespace BwPicker;
 
 /// <summary>The window that had focus when the hotkey was pressed.</summary>
-sealed record WindowContext(IntPtr Handle, string ProcessName, string Title)
+sealed record WindowContext(IntPtr Handle, string ProcessName, string AppName, string Title)
 {
     public static WindowContext From(IntPtr hwnd)
     {
         var title = new StringBuilder(512);
         Native.GetWindowText(hwnd, title, title.Capacity);
 
-        string process = "";
+        string process = "", appName = "";
         try
         {
             Native.GetWindowThreadProcessId(hwnd, out uint pid);
             using var p = Process.GetProcessById((int)pid);
-            process = p.ProcessName;
+            process = appName = p.ProcessName;
+            // "Discord", "Google Chrome", … Fails for elevated processes, which is fine.
+            var description = p.MainModule?.FileVersionInfo.FileDescription;
+            if (!string.IsNullOrWhiteSpace(description)) appName = description.Trim();
         }
         catch (ArgumentException) { }
         catch (InvalidOperationException) { }
+        catch (System.ComponentModel.Win32Exception) { }
 
-        return new WindowContext(hwnd, process, title.ToString());
+        return new WindowContext(hwnd, process, appName, title.ToString());
     }
 }
 

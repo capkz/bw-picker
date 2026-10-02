@@ -77,12 +77,13 @@ sealed class TrayApp : ApplicationContext
 
     async Task<bool> Unlock()
     {
-        if (await bw.Status() == "unauthenticated")
+        var status = await bw.Status();
+        if (status.Status == "unauthenticated")
         {
             Notify("Log in once first: run `bw login` in a terminal.", ToolTipIcon.Warning);
             return false;
         }
-        using var form = new UnlockForm(bw);
+        using var form = new UnlockForm(bw, status);
         return form.ShowDialog() == DialogResult.OK;
     }
 

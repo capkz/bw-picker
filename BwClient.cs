@@ -9,6 +9,8 @@ namespace BwPicker;
 /// <summary>A vault login without its password; passwords are fetched only when used.</summary>
 sealed record Entry(string Id, string Name, string? Username, string[] Uris);
 
+sealed record BwStatus(string Status, string? Email, string? ServerUrl);
+
 /// <summary>Thin wrapper around the Bitwarden CLI. The session key lives only in memory.</summary>
 sealed class BwClient
 {
@@ -17,15 +19,19 @@ sealed class BwClient
     string? session;
 
     public bool Unlocked => session != null;
+
+    /// <summary>Sample data for `--preview`, to check the UI without a vault.</summary>
+    public static BwClient Preview(IEnumerable<Entry> entries) => new() { Entries = entries.ToList() };
     public IReadOnlyList<Entry> Entries { get; private set; } = [];
 
-    public async Task<string> Status()
+    public async Task<BwStatus> Status()
     {
         var (_, stdout, _) = await Run(null, "status");
         int start = stdout.IndexOf('{');
         if (start < 0) throw new InvalidOperationException("Unexpected `bw status` output.");
         using var doc = JsonDocument.Parse(stdout[start..]);
-        return doc.RootElement.GetProperty("status").GetString() ?? "unknown";
+        var root = doc.RootElement;
+        return new BwStatus(GetString(root, "status") ?? "unknown", GetString(root, "userEmail"), GetString(root, "serverUrl"));
     }
 
     public async Task Unlock(string masterPassword)
