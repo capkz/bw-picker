@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace BwPicker;
 
@@ -11,6 +12,8 @@ sealed record Entry(string Id, string Name, string? Username, string[] Uris);
 /// <summary>Thin wrapper around the Bitwarden CLI. The session key lives only in memory.</summary>
 sealed class BwClient
 {
+    static readonly Regex SessionKeyPattern = new(@"^[A-Za-z0-9+/=]{40,}$");
+
     string? session;
 
     public bool Unlocked => session != null;
@@ -29,10 +32,13 @@ sealed class BwClient
     {
         // Passed through the child's environment only, never on the command line or disk.
         var env = new Dictionary<string, string> { ["BWPICKER_PW"] = masterPassword };
-        var (code, stdout, stderr) = await Run(env, "unlock", "--passwordenv", "BWPICKER_PW", "--raw");
-        if (code != 0 || string.IsNullOrWhiteSpace(stdout))
+        var (_, stdout, stderr) = await Run(env, "unlock", "--passwordenv", "BWPICKER_PW", "--raw");
+        // Newer CLIs log errors (and may exit non-zero) when Vaultwarden lacks an endpoint they call
+        // after unlocking, e.g. the user key id backfill. The session key is still printed, so trust that.
+        string? key = stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+        if (key == null || !SessionKeyPattern.IsMatch(key))
             throw new InvalidOperationException(FirstLine(stderr) ?? "Unlock failed.");
-        session = stdout.Trim();
+        session = key;
     }
 
     public async Task Load(bool sync)
