@@ -10,7 +10,7 @@ sealed class TrayApp : ApplicationContext
     const string HotkeyLabel = "Ctrl+Alt+B";
     static readonly TimeSpan AutoLockAfter = TimeSpan.FromMinutes(15);
 
-    readonly BwClient bw = new();
+    readonly BwClient bw;
     readonly AppSettings settings = AppSettings.Load();
     readonly Updater updater;
     readonly System.Windows.Forms.Timer updateTimer;
@@ -25,8 +25,10 @@ sealed class TrayApp : ApplicationContext
     bool busy;
     bool syncing;
 
-    public TrayApp()
+    /// <param name="client">An alternative vault client; by default the real Bitwarden CLI.</param>
+    public TrayApp(BwClient? client = null)
     {
+        bw = client ?? new();
         _ = dispatcher.Handle;
         updater = new Updater(settings);
         updater.ReadyToInstall += (_, exe) => InstallUpdate(exe);

@@ -1,7 +1,10 @@
 namespace BwPicker;
 
-static class Program
+static partial class Program
 {
+    /// <summary>Optional local extension point (e.g. an untracked *.local.cs); compiled out when not implemented.</summary>
+    static partial void CreateClient(string[] args, ref BwClient? client);
+
     [STAThread]
     static void Main(string[] args)
     {
@@ -24,7 +27,9 @@ static class Program
 
         try { Startup.Refresh(); } catch (UnauthorizedAccessException) { } catch (System.Security.SecurityException) { }
         ApplicationConfiguration.Initialize();
-        Application.Run(new TrayApp());
+        BwClient? client = null;
+        CreateClient(args, ref client);
+        Application.Run(new TrayApp(client));
     }
 
     static void ShowSettingsPreview(string? snapshot)

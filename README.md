@@ -6,7 +6,9 @@ A keyboard-driven picker that types your Bitwarden logins into **any Windows app
 
 > **Unofficial.** BwPicker is an independent project and is not affiliated with, endorsed by, or supported by Bitwarden Inc. It uses the official, signed [Bitwarden CLI](https://bitwarden.com/help/cli/) for all vault access.
 
-<p align="center"><img src="docs/screenshot.png" width="600" alt="BwPicker search popup over an app, listing matching logins"></p>
+<p align="center"><img src="docs/demo.gif" width="760" alt="Pressing Ctrl+Alt+B on Discord's login screen opens BwPicker with the Discord logins first; Enter types the email and password"></p>
+
+<p align="center"><sub>Recorded with a made-up demo vault.</sub></p>
 
 ## Why
 
