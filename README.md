@@ -60,13 +60,13 @@ winget install Bitwarden.CLI
 Download the zip from [Releases](../../releases). Releases are built by GitHub Actions from the tagged source. Each one includes a `SHA256SUMS.txt` and a signed [build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations), which you can verify with:
 
 ```powershell
-gh attestation verify BwPicker-win-x64.zip --repo <owner>/bw-picker
+gh attestation verify BwPicker-win-x64.zip --repo capkz/bw-picker
 ```
 
 The executable is not code-signed, so Windows SmartScreen may warn on first run. Building from source is the most trustworthy option:
 
 ```powershell
-git clone https://github.com/<owner>/bw-picker
+git clone https://github.com/capkz/bw-picker
 cd bw-picker
 dotnet build -c Release
 .\bin\Release\net10.0-windows\BwPicker.exe
