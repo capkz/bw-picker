@@ -283,6 +283,12 @@ static class Tests
         hopping.AfterSend = () => hopping.Field = new IntPtr(10 + hopping.Sends);
         new InputTyper(hopping).Type(new IntPtr(1), credential, false, () => true, () => true);
         Assert(hopping.Sends > 2, "Typing stopped when focus moved between controls inside the same window");
+        // Chromium/Electron (e.g. Discord) briefly reports no focus after reactivation, and occasionally mid-typing.
+        var settling = new FakeKeyboard { FocusDropouts = 10 };
+        settling.AfterSend = () => { if (settling.Sends == 3) settling.FocusDropouts = 3; };
+        new InputTyper(settling).Type(new IntPtr(1), credential, false, () => true, () => true);
+        Assert(settling.Sends == credential.Username!.Length + 1 + credential.Password!.Characters.Length,
+            "Typing stopped on a brief focus dropout");
         // Two-step logins: each page gets only its own field, and nothing else is typed.
         var usernameOnly = new FakeKeyboard();
         new InputTyper(usernameOnly).Type(new IntPtr(1), credential, false, () => true, () => true, TypeFields.UsernameOnly);
@@ -326,7 +332,12 @@ static class Tests
         public IntPtr Foreground => Window;
         public bool ModifiersDown => Held;
         public bool Focus(IntPtr window) => true;
-        public bool FocusInside(IntPtr window) => Field != IntPtr.Zero && FieldRoot == window;
+        public int FocusDropouts; // checks that report no focus, like Chromium right after activation
+        public bool FocusInside(IntPtr window)
+        {
+            if (FocusDropouts > 0) { FocusDropouts--; return false; }
+            return Field != IntPtr.Zero && FieldRoot == window;
+        }
         public void Wait(int milliseconds) { }
         public uint Send(Native.INPUT[] inputs) { Sends++; AfterSend?.Invoke(); return Blocked ? 0u : (uint)inputs.Length; }
     }

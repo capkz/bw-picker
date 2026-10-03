@@ -57,6 +57,19 @@ sealed class InputTyper(IKeyboard keyboard)
         tries = 0;
         while (keyboard.ModifiersDown && tries++ < 150) keyboard.Wait(20);
         if (keyboard.ModifiersDown) throw new InvalidOperationException("Held modifier keys prevented typing. Release them and try again.");
+        // Chromium/Electron apps briefly report no focused control right after being reactivated.
+        // Wait for focus to settle first; nothing is sent while it is outside the window.
+        tries = 0;
+        while (!keyboard.FocusInside(window) && tries++ < 40) keyboard.Wait(25);
+        bool FocusSettles()
+        {
+            for (int i = 0; i < 8; i++)
+            {
+                if (keyboard.FocusInside(window)) return true;
+                keyboard.Wait(25);
+            }
+            return false;
+        }
         void Guard()
         {
             string? reason =
@@ -64,7 +77,7 @@ sealed class InputTyper(IKeyboard keyboard)
                 keyboard.Foreground != window ? "another window came to the front" :
                 keyboard.ModifiersDown ? "Ctrl, Alt, Shift or Win was held down" :
                 !stillMatches() ? "the app's window changed (title or process)" :
-                !keyboard.FocusInside(window) ? "keyboard focus left the app's window" :
+                !FocusSettles() ? "keyboard focus left the app's window" :
                 null;
             if (reason != null) throw new InvalidOperationException($"Typing stopped: {reason}.");
         }
