@@ -35,23 +35,25 @@ sealed record Theme(
     public static Theme Current()
     {
         bool dark = ForceDark ?? ReadDword(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme") == 0;
-        Color accent = ReadAccent() ?? Color.FromArgb(0, 120, 212);
+        Color accent = Rgb(0x6366F1);
 
         return dark
             ? new Theme(true,
-                Background: Rgb(0x202020), Surface: Rgb(0x2C2C2C), Hover: Rgb(0x2A2A2A), Selected: Rgb(0x343434),
-                Text: Rgb(0xFFFFFF), SubtleText: Rgb(0xA3A3A3), Divider: Rgb(0x2E2E2E), Border: Rgb(0x404040),
-                Accent: Blend(accent, Color.White, 0.4f), OnAccent: Rgb(0x000000), Critical: Rgb(0xFF99A4))
+                Background: Rgb(0x15171E), Surface: Rgb(0x20232D), Hover: Rgb(0x20232D), Selected: Rgb(0x292B43),
+                Text: Rgb(0xF2F3FA), SubtleText: Rgb(0xA1A7BA), Divider: Rgb(0x292D39), Border: Rgb(0x373D4E),
+                Accent: Rgb(0xA5A7FF), OnAccent: Rgb(0x191A33), Critical: Rgb(0xFF99A4))
             : new Theme(false,
-                Background: Rgb(0xFAFAFA), Surface: Rgb(0xEFEFEF), Hover: Rgb(0xF2F2F2), Selected: Rgb(0xEAEAEA),
-                Text: Rgb(0x1B1B1B), SubtleText: Rgb(0x626262), Divider: Rgb(0xE8E8E8), Border: Rgb(0xD2D2D2),
+                Background: Rgb(0xFCFCFE), Surface: Rgb(0xF1F2F7), Hover: Rgb(0xF1F2F7), Selected: Rgb(0xEEEFFE),
+                Text: Rgb(0x202438), SubtleText: Rgb(0x687086), Divider: Rgb(0xE8EAF1), Border: Rgb(0xDCDfea),
                 Accent: accent, OnAccent: Rgb(0xFFFFFF), Critical: Rgb(0xC42B1C));
     }
 
-    public static Font Body(float size) => new(TextFamily, size);
-    public static Font Semibold(float size) => SemiboldFamily == TextFamily ? new(TextFamily, size, FontStyle.Bold) : new(SemiboldFamily, size);
-    public static Font Display(float size) => new(DisplayFamily, size);
-    public static Font Icons(float size) => new(IconFamily, size);
+    // Pixel units avoid GDI resolving point fonts against the system DPI instead of the popup's monitor.
+    public static Font Body(float size, int dpi) => new(TextFamily, size * dpi / 72f, FontStyle.Regular, GraphicsUnit.Pixel);
+    public static Font Semibold(float size, int dpi) => new(SemiboldFamily, size * dpi / 72f,
+        SemiboldFamily == TextFamily ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+    public static Font Display(float size, int dpi) => new(DisplayFamily, size * dpi / 72f, FontStyle.Regular, GraphicsUnit.Pixel);
+    public static Font Icons(float size, int dpi) => new(IconFamily, size * dpi / 72f, FontStyle.Regular, GraphicsUnit.Pixel);
 
     /// <summary>Rounded corners, system shadow, dark title-bar mode and a subtle border, via DWM.</summary>
     public void ApplyChrome(Form form)
@@ -90,6 +92,20 @@ sealed record Theme(
         g.DrawPath(pen, path);
     }
 
+    public static void DrawShield(Graphics g, Rectangle bounds, Color color)
+    {
+        float x = bounds.X, y = bounds.Y, w = bounds.Width, h = bounds.Height;
+        using var path = new GraphicsPath();
+        path.AddLines([new PointF(x + w / 2, y), new PointF(x + w, y + h * .18f),
+            new PointF(x + w * .9f, y + h * .65f), new PointF(x + w / 2, y + h),
+            new PointF(x + w * .1f, y + h * .65f), new PointF(x, y + h * .18f)]);
+        path.CloseFigure();
+        using var pen = new Pen(color, Math.Max(1.5f, w / 12)) { LineJoin = LineJoin.Round };
+        g.DrawPath(pen, path);
+        g.DrawLines(pen, [new PointF(x + w * .28f, y + h * .48f),
+            new PointF(x + w * .45f, y + h * .64f), new PointF(x + w * .73f, y + h * .34f)]);
+    }
+
     public static Color Blend(Color a, Color b, float amount) => Color.FromArgb(
         (int)(a.R + (b.R - a.R) * amount),
         (int)(a.G + (b.G - a.G) * amount),
@@ -115,6 +131,23 @@ sealed record Theme(
     static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }
 
+/// <summary>One font per monitor DPI, shared by measurement, controls and painting.</summary>
+sealed class DpiFont(Func<float, int, Font> create, float size) : IDisposable
+{
+    Font value = create(size, 96);
+    int dpi = 96;
+    public void SetDpi(int next)
+    {
+        if (dpi == next) return;
+        var previous = value;
+        value = create(size, next);
+        dpi = next;
+        previous.Dispose();
+    }
+    public static implicit operator Font(DpiFont font) => font.value;
+    public void Dispose() => value.Dispose();
+}
+
 /// <summary>Borderless popup with the system drop shadow and per-monitor DPI helpers.</summary>
 class ThemedForm : Form
 {
@@ -122,6 +155,7 @@ class ThemedForm : Form
 
     protected ThemedForm()
     {
+        Icon = AppIcon.Window;
         FormBorderStyle = FormBorderStyle.None;
         AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;

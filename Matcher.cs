@@ -7,16 +7,47 @@ namespace BwPicker;
 /// <summary>The window that had focus when the hotkey was pressed.</summary>
 sealed record WindowContext(IntPtr Handle, string ProcessName, string AppName, string Title)
 {
+    public uint ProcessId { get; init; }
+    public long StartedAt { get; init; }
+
+    public bool HasOriginalIdentity()
+    {
+        if (ProcessId == 0 || StartedAt == 0 || !WindowStillMatches()) return false;
+        try { using var process = Process.GetProcessById((int)ProcessId); return process.StartTime.ToUniversalTime().Ticks == StartedAt; }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+        catch (System.ComponentModel.Win32Exception) { return false; }
+    }
+
+    public bool WindowStillMatches()
+    {
+        if (!Native.IsWindow(Handle)) return false;
+        Native.GetWindowThreadProcessId(Handle, out uint pid);
+        return pid == ProcessId && ReadTitle(Handle) == Title;
+    }
+
+    static string ReadTitle(IntPtr hwnd)
+    {
+        int length = Native.GetWindowTextLength(hwnd);
+        if (length < 0 || length > 8192) throw new InvalidOperationException("Cannot verify the destination window title.");
+        var title = new StringBuilder(length + 1);
+        Native.GetWindowText(hwnd, title, title.Capacity);
+        return title.ToString();
+    }
+
     public static WindowContext From(IntPtr hwnd)
     {
-        var title = new StringBuilder(512);
-        Native.GetWindowText(hwnd, title, title.Capacity);
+        string title = ReadTitle(hwnd);
+        uint processId = 0;
+        long startedAt = 0;
 
         string process = "", appName = "";
         try
         {
             Native.GetWindowThreadProcessId(hwnd, out uint pid);
             using var p = Process.GetProcessById((int)pid);
+            processId = pid;
+            startedAt = p.StartTime.ToUniversalTime().Ticks;
             process = appName = p.ProcessName;
             // "Discord", "Google Chrome", … Fails for elevated processes, which is fine.
             var description = p.MainModule?.FileVersionInfo.FileDescription;
@@ -26,7 +57,7 @@ sealed record WindowContext(IntPtr Handle, string ProcessName, string AppName, s
         catch (InvalidOperationException) { }
         catch (System.ComponentModel.Win32Exception) { }
 
-        return new WindowContext(hwnd, process, appName, title.ToString());
+        return new WindowContext(hwnd, process, appName, title) { ProcessId = processId, StartedAt = startedAt };
     }
 }
 
@@ -61,7 +92,7 @@ sealed class Matcher
     public int Score(Entry e)
     {
         string name = e.Name.ToLowerInvariant();
-        string[] hosts = e.Uris.Select(Host).ToArray();
+        string[] hosts = e.Hosts;
         int score = 0;
 
         if (processToken.Length > 0)
@@ -80,13 +111,14 @@ sealed class Matcher
     public static bool MatchesQuery(Entry e, string query)
     {
         var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 0) return true;
-        string haystack = $"{e.Name} {e.Username} {string.Join(' ', e.Uris)}";
-        return words.All(w => haystack.Contains(w, StringComparison.OrdinalIgnoreCase));
+        return MatchesQuery(e, words);
     }
 
+    public static bool MatchesQuery(Entry e, string[] words) =>
+        words.All(w => e.SearchText.Contains(w, StringComparison.OrdinalIgnoreCase));
+
     // Also handles "apptitle://discord" and bare "discord.com".
-    static string Host(string uri) =>
+    internal static string Host(string uri) =>
         Uri.TryCreate(uri.Contains("://") ? uri : "https://" + uri, UriKind.Absolute, out var u)
             ? u.Host.ToLowerInvariant()
             : uri.ToLowerInvariant();

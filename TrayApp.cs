@@ -14,11 +14,15 @@ sealed class TrayApp : ApplicationContext
     readonly NotifyIcon tray;
     readonly HotkeyWindow hotkeyWindow;
     readonly System.Windows.Forms.Timer lockTimer;
-    DateTime lastUsed = DateTime.Now;
+    readonly Control dispatcher = new();
+    long lastUsed = Environment.TickCount64;
+    volatile bool shuttingDown, sessionLocked, suspended;
     bool busy;
+    bool syncing;
 
     public TrayApp()
     {
+        _ = dispatcher.Handle;
         var startup = new ToolStripMenuItem("Start with Windows") { Checked = Startup.Enabled, CheckOnClick = true };
         startup.CheckedChanged += (_, _) => Startup.Enabled = startup.Checked;
 
@@ -31,39 +35,50 @@ sealed class TrayApp : ApplicationContext
 
         tray = new NotifyIcon
         {
-            Icon = SystemIcons.Shield,
+            Icon = AppIcon.Tray,
             Text = $"BwPicker ({HotkeyLabel})",
             ContextMenuStrip = menu,
             Visible = true,
         };
 
-        hotkeyWindow = new HotkeyWindow(id => { if (id == HotkeyId) _ = OnHotkey(); });
+        hotkeyWindow = new HotkeyWindow(id => { if (id == HotkeyId) OnHotkey(); });
         if (!Native.RegisterHotKey(hotkeyWindow.Handle, HotkeyId, HotkeyModifiers, (uint)HotkeyKey))
             Notify($"{HotkeyLabel} is already used by another app.", ToolTipIcon.Warning);
 
         lockTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
         lockTimer.Tick += async (_, _) =>
         {
-            if (bw.Unlocked && !busy && DateTime.Now - lastUsed > AutoLockAfter) await Lock();
+            if (bw.Unlocked && Environment.TickCount64 - lastUsed > AutoLockAfter.TotalMilliseconds) await Lock();
         };
         lockTimer.Start();
 
         SystemEvents.SessionSwitch += OnSessionSwitch;
+        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        using var warmFont = Theme.Body(9.5f, 96);
+        _ = WarmStatus();
     }
 
-    async Task OnHotkey()
+    async Task WarmStatus()
     {
-        if (busy) return;
+        try { await bw.Status(); }
+        catch (InvalidOperationException) { /* The unlock window reports errors when opened. */ }
+    }
+
+    void OnHotkey()
+    {
+        if (busy || shuttingDown || sessionLocked || suspended) return;
         busy = true;
         try
         {
             var target = WindowContext.From(Native.GetForegroundWindow());
-            if (!bw.Unlocked && !await Unlock()) return;
-            lastUsed = DateTime.Now;
+            bool needsUnlock = !bw.Unlocked;
+            if (needsUnlock && !Unlock()) return;
+            lastUsed = Environment.TickCount64;
+            if (needsUnlock) _ = Sync(quiet: true);
 
             using var picker = new PickerForm(bw, target, Notify);
             picker.ShowDialog();
-            lastUsed = DateTime.Now;
+            lastUsed = Environment.TickCount64;
         }
         catch (InvalidOperationException ex)
         {
@@ -75,59 +90,100 @@ sealed class TrayApp : ApplicationContext
         }
     }
 
-    async Task<bool> Unlock()
+    bool Unlock()
     {
-        var status = await bw.Status();
-        if (status.Status == "unauthenticated")
-        {
-            Notify("Log in once first: run `bw login` in a terminal.", ToolTipIcon.Warning);
-            return false;
-        }
-        using var form = new UnlockForm(bw, status);
+        using var form = new UnlockForm(bw);
         return form.ShowDialog() == DialogResult.OK;
     }
 
-    async Task Sync()
+    async Task Sync(bool quiet = false)
     {
+        if (syncing) return;
         if (!bw.Unlocked)
         {
-            Notify("Vault is locked; it syncs when you unlock.", ToolTipIcon.Info);
+            if (!quiet) Notify("Vault is locked; it syncs when you unlock.", ToolTipIcon.Info);
             return;
         }
+        syncing = true;
         try
         {
             await bw.Load(sync: true);
-            Notify($"Synced {bw.Entries.Count} logins.", ToolTipIcon.Info);
+            if (!quiet && bw.Unlocked) Notify($"Synced {bw.Entries.Count} logins.", ToolTipIcon.Info);
         }
         catch (InvalidOperationException ex)
         {
-            Notify(ex.Message, ToolTipIcon.Error);
+            Notify(quiet ? "Background sync failed; using the local vault. " + ex.Message : ex.Message, ToolTipIcon.Warning);
         }
+        finally { syncing = false; }
     }
 
     async Task Lock()
     {
-        await bw.Lock();
+        try { var task = bw.Lock(); SecureClipboard.ClearOwned(); await task; }
+        catch (InvalidOperationException ex) { Notify(ex.Message, ToolTipIcon.Warning); }
     }
 
     async void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
     {
-        if (e.Reason == SessionSwitchReason.SessionLock) await Lock();
+        if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.SessionLogoff or
+            SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect)
+        {
+            sessionLocked = true;
+            await BlockAccess();
+        }
+        else if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.SessionLogon or
+            SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect)
+        {
+            sessionLocked = false;
+            if (!suspended) bw.AllowInteraction();
+        }
+    }
+
+    async void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Suspend) { suspended = true; await BlockAccess(); }
+        else if (e.Mode == PowerModes.Resume) { suspended = false; if (!sessionLocked) bw.AllowInteraction(); }
+    }
+
+    async Task BlockAccess()
+    {
+        try { var task = bw.Block(); SecureClipboard.ClearOwned(); await task; }
+        catch (InvalidOperationException ex) { Notify(ex.Message, ToolTipIcon.Warning); }
     }
 
     async Task Shutdown()
     {
+        if (shuttingDown) return;
+        shuttingDown = true;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         lockTimer.Stop();
         Native.UnregisterHotKey(hotkeyWindow.Handle, HotkeyId);
         hotkeyWindow.Dispose();
-        await bw.Lock();
-        tray.Visible = false;
-        tray.Dispose();
-        ExitThread();
+        try { var task = bw.Lock(); SecureClipboard.ClearOwned(); await task; }
+        catch (InvalidOperationException) { }
+        finally { bw.Dispose(); tray.Visible = false; tray.Dispose(); ExitThread(); }
     }
 
-    void Notify(string message, ToolTipIcon icon) => tray.ShowBalloonTip(4000, "BwPicker", message, icon);
+    void Notify(string message, ToolTipIcon icon)
+    {
+        if (shuttingDown || dispatcher.IsDisposed) return;
+        if (dispatcher.InvokeRequired) { dispatcher.BeginInvoke(() => Notify(message, icon)); return; }
+        tray.ShowBalloonTip(4000, "BwPicker", message, icon);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            shuttingDown = true;
+            SystemEvents.SessionSwitch -= OnSessionSwitch;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            bw.Dispose(); SecureClipboard.ClearOwned();
+            lockTimer.Dispose(); tray.Dispose(); hotkeyWindow.Dispose(); dispatcher.Dispose();
+        }
+        base.Dispose(disposing);
+    }
 
     sealed class HotkeyWindow : NativeWindow, IDisposable
     {

@@ -10,7 +10,8 @@ static class Program
             ApplicationConfiguration.Initialize();
             if (args.Contains("--dark")) Theme.ForceDark = true;
             if (args.Contains("--light")) Theme.ForceDark = false;
-            ShowPreview(args.Contains("--unlock"), args.SkipWhile(a => a != "--snapshot").Skip(1).FirstOrDefault());
+            ShowPreview(args.Contains("--unlock"), args.SkipWhile(a => a != "--snapshot").Skip(1).FirstOrDefault(),
+                args.SkipWhile(a => a != "--query").Skip(1).FirstOrDefault());
             return;
         }
 
@@ -21,11 +22,11 @@ static class Program
         Application.Run(new TrayApp());
     }
 
-    static void ShowPreview(bool unlock, string? snapshot)
+    static void ShowPreview(bool unlock, string? snapshot, string? query)
     {
         if (unlock)
         {
-            Run(new UnlockForm(new BwClient(), new BwStatus("locked", "you@example.com", "https://vault.example.com")), snapshot);
+            Run(() => new UnlockForm(BwClient.Preview([]), new BwStatus("locked", "you@example.com", "https://vault.example.com")), snapshot);
             return;
         }
         var bw = BwClient.Preview(
@@ -40,23 +41,39 @@ static class Program
             new("8", "Wi-Fi router", null, ["http://192.168.0.1"]),
         ]);
         var target = new WindowContext(IntPtr.Zero, "discord", "Discord", "Friends - Discord");
-        Run(new PickerForm(bw, target, (_, _) => { }) { CloseOnDeactivate = false }, snapshot);
+        Run(() =>
+        {
+            var picker = new PickerForm(bw, target, (_, _) => { }) { CloseOnDeactivate = false };
+            if (query != null) picker.Controls.OfType<TextBox>().Single().Text = query == "*" ? "" : query;
+            return picker;
+        }, snapshot);
     }
 
     // With a snapshot path, renders the window to a PNG and exits instead of staying open.
-    static void Run(Form form, string? snapshot)
+    static void Run(Func<Form> createForm, string? snapshot)
     {
-        if (snapshot != null)
+        // Match the tray app: create the popup after the message loop has started.
+        using var context = new ApplicationContext();
+        using var timer = new System.Windows.Forms.Timer { Interval = 100 };
+        timer.Tick += (_, _) =>
         {
-            form.Shown += async (_, _) =>
+            timer.Stop();
+            var form = createForm();
+            form.FormClosed += (_, _) => { form.Dispose(); context.ExitThread(); };
+            if (snapshot != null)
             {
-                await Task.Delay(300);
-                using var bmp = new Bitmap(form.Width, form.Height);
-                form.DrawToBitmap(bmp, new Rectangle(Point.Empty, form.Size));
-                bmp.Save(snapshot);
-                form.Close();
-            };
-        }
-        Application.Run(form);
+                form.Shown += async (_, _) =>
+                {
+                    await Task.Delay(300);
+                    using var bmp = new Bitmap(form.Width, form.Height);
+                    form.DrawToBitmap(bmp, new Rectangle(Point.Empty, form.Size));
+                    bmp.Save(snapshot);
+                    form.Close();
+                };
+            }
+            form.Show();
+        };
+        timer.Start();
+        Application.Run(context);
     }
 }

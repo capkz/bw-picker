@@ -4,9 +4,9 @@ namespace BwPicker;
 sealed class ResultList : Control
 {
     readonly Theme theme;
-    readonly Font nameFont = Theme.Semibold(10.5f);
-    readonly Font detailFont = Theme.Body(9f);
-    readonly Font monogramFont = Theme.Semibold(11f);
+    readonly DpiFont nameFont = new(Theme.Semibold, 10.5f);
+    readonly DpiFont detailFont = new(Theme.Body, 9f);
+    readonly DpiFont monogramFont = new(Theme.Semibold, 11f);
     List<Entry> items = [];
     int selected = -1, hover = -1, scroll;
 
@@ -16,8 +16,18 @@ sealed class ResultList : Control
     public string EmptyText { get; set; } = "";
     public int Count => items.Count;
     public Entry? SelectedEntry => selected >= 0 ? items[selected] : null;
-    public int RowHeight => S(54);
-    public int Inset => S(6);
+    public int RowHeight => S(56);
+    public int Inset => S(10);
+    int layoutDpi = 96;
+    public void SetDpi(int dpi)
+    {
+        layoutDpi = dpi;
+        nameFont.SetDpi(dpi);
+        detailFont.SetDpi(dpi);
+        monogramFont.SetDpi(dpi);
+        if (selected >= 0) EnsureVisible(selected);
+        Invalidate();
+    }
 
     public ResultList(Theme theme)
     {
@@ -28,12 +38,14 @@ sealed class ResultList : Control
         BackColor = theme.Background;
     }
 
-    public void SetItems(IEnumerable<Entry> entries)
+    public void SetItems(IEnumerable<Entry> entries, string? selectedId = null)
     {
         items = entries.ToList();
         selected = items.Count > 0 ? 0 : -1;
+        if (selectedId != null && items.FindIndex(entry => entry.Id == selectedId) is int index && index >= 0) selected = index;
         hover = -1;
         scroll = 0;
+        if (selected >= 0) EnsureVisible(selected);
         Invalidate();
     }
 
@@ -89,40 +101,53 @@ sealed class ResultList : Control
         var entry = items[i];
         bool isSelected = i == selected;
         var row = new Rectangle(Inset, Inset + i * RowHeight - scroll, Width - Inset * 2, RowHeight);
-        var card = Rectangle.Inflate(row, 0, -S(1));
+        var card = Rectangle.Inflate(row, 0, -S(3));
 
         if (isSelected)
         {
-            Theme.FillRounded(g, theme.Selected, card, S(6));
-            // Fluent selection pill
-            Theme.FillRounded(g, theme.Accent, new RectangleF(card.X, card.Y + card.Height / 2f - S(9), S(3), S(18)), S(1.5f));
+            Theme.FillRounded(g, theme.Selected, card, S(12));
+            Theme.DrawRounded(g, Theme.Blend(theme.Selected, theme.Accent, .3f),
+                new RectangleF(card.X + .5f, card.Y + .5f, card.Width - 1, card.Height - 1), S(12));
         }
         else if (i == hover)
         {
-            Theme.FillRounded(g, theme.Hover, card, S(6));
+            Theme.FillRounded(g, theme.Hover, card, S(12));
         }
 
-        var mono = new Rectangle(row.X + S(14), row.Y + (row.Height - S(32)) / 2, S(32), S(32));
-        Theme.FillRounded(g, isSelected ? Theme.Blend(theme.Selected, theme.Accent, 0.22f) : theme.Surface, mono, S(7));
-        TextRenderer.DrawText(g, Monogram(entry.Name), monogramFont, mono, isSelected ? theme.Text : theme.SubtleText,
+        var mono = new Rectangle(row.X + S(12), row.Y + (row.Height - S(32)) / 2, S(32), S(32));
+        Color identity = IdentityColor(entry.Name);
+        Theme.FillRounded(g, Theme.Blend(theme.Background, identity, theme.Dark ? .22f : .1f), mono, S(12));
+        TextRenderer.DrawText(g, Monogram(entry.Name), monogramFont, mono, Theme.Blend(identity, theme.Text, theme.Dark ? .5f : .15f),
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
 
-        int siteWidth = S(170);
-        int textX = mono.Right + S(12);
-        int textWidth = row.Right - textX - siteWidth - S(12);
+        int siteWidth = S(145);
+        int textX = mono.Right + S(14);
+        int textWidth = row.Right - textX - siteWidth - S(48);
         var flags = TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.VerticalCenter;
 
         bool hasUser = !string.IsNullOrEmpty(entry.Username);
         var nameBounds = hasUser
-            ? new Rectangle(textX, row.Y + S(8), textWidth, S(21))
+            ? new Rectangle(textX, row.Y + S(7), textWidth, S(22))
             : new Rectangle(textX, row.Y, textWidth, row.Height);
         TextRenderer.DrawText(g, entry.Name, nameFont, nameBounds, theme.Text, flags);
         if (hasUser)
-            TextRenderer.DrawText(g, entry.Username, detailFont, new Rectangle(textX, row.Y + S(28), textWidth, S(18)), theme.SubtleText, flags);
+            TextRenderer.DrawText(g, entry.Username, detailFont, new Rectangle(textX, row.Y + S(29), textWidth, S(20)), theme.SubtleText, flags);
 
-        TextRenderer.DrawText(g, SiteOf(entry), detailFont, new Rectangle(row.Right - siteWidth - S(14), row.Y, siteWidth, row.Height),
+        TextRenderer.DrawText(g, entry.Site, detailFont, new Rectangle(row.Right - siteWidth - S(46), row.Y, siteWidth, row.Height),
             theme.SubtleText, flags | TextFormatFlags.Right);
+        if (isSelected)
+            TextRenderer.DrawText(g, "↵", nameFont, new Rectangle(row.Right - S(36), row.Y, S(24), row.Height), theme.Accent, flags | TextFormatFlags.HorizontalCenter);
     }
+
+    static Color IdentityColor(string name)
+    {
+        uint hash = 0;
+        foreach (char c in name) hash = unchecked(hash * 31 + char.ToUpperInvariant(c));
+        return IdentityColors[hash % (uint)IdentityColors.Length];
+    }
+
+    static readonly Color[] IdentityColors = [Color.FromArgb(99, 102, 241), Color.FromArgb(14, 145, 130),
+        Color.FromArgb(190, 107, 38), Color.FromArgb(170, 76, 143), Color.FromArgb(55, 124, 195)];
 
     void DrawScrollIndicator(Graphics g)
     {
@@ -136,17 +161,6 @@ sealed class ResultList : Control
     {
         var c = name.FirstOrDefault(char.IsLetterOrDigit);
         return c == default ? "•" : char.ToUpperInvariant(c).ToString();
-    }
-
-    static string SiteOf(Entry entry)
-    {
-        foreach (var uri in entry.Uris)
-        {
-            if (uri.StartsWith("apptitle://", StringComparison.OrdinalIgnoreCase)) continue;
-            if (Uri.TryCreate(uri.Contains("://") ? uri : "https://" + uri, UriKind.Absolute, out var u) && u.Host.Length > 0)
-                return u.Host.StartsWith("www.") ? u.Host[4..] : u.Host;
-        }
-        return "";
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -178,7 +192,14 @@ sealed class ResultList : Control
         Invalidate();
     }
 
-    int S(float px) => (int)Math.Round(px * DeviceDpi / 96f);
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (selected >= 0) EnsureVisible(selected);
+        else ClampScroll();
+    }
+
+    int S(float px) => (int)Math.Round(px * layoutDpi / 96f);
 
     protected override void Dispose(bool disposing)
     {
