@@ -7,5 +7,5 @@
     <Nullable>enable</Nullable>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="..\BwPicker.csproj" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="..\..\src\BwPicker\BwPicker.csproj" /></ItemGroup>
 </Project>

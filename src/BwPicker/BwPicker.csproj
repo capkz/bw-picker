@@ -11,11 +11,13 @@
     <AssemblyName>BwPicker</AssemblyName>
     <RootNamespace>BwPicker</RootNamespace>
     <ApplicationIcon>assets\bw-picker.ico</ApplicationIcon>
+    <!-- Local builds are "-dev" and never auto-update; release CI passes -p:Version from the git tag. -->
+    <Version>0.0.0-dev</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="assets\bw-picker.ico" LogicalName="BwPicker.AppIcon.ico" />
-    <Compile Remove="tests\**\*.cs" />
     <InternalsVisibleTo Include="BwPicker.Tests" />
   </ItemGroup>
 
