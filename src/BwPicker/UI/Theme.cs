@@ -184,6 +184,20 @@ class ThemedForm : Form
 
     protected int S(float px) => (int)Math.Round(px * DeviceDpi / 96f);
 
+    /// <summary>Lets a borderless window be moved by dragging <paramref name="handle"/>.</summary>
+    protected void MakeDraggable(Control handle)
+    {
+        handle.MouseDown += (_, e) =>
+        {
+            if (e.Button != MouseButtons.Left) return;
+            ReleaseCapture();
+            SendMessage(Handle, 0xA1 /* WM_NCLBUTTONDOWN */, 2 /* HTCAPTION */, 0);
+        };
+    }
+
+    [DllImport("user32.dll")] static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, int wParam, int lParam);
+
     protected static void PrepareGraphics(Graphics g)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;

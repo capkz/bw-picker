@@ -21,7 +21,10 @@ No desktop password tool can be guaranteed 100% malware or hack proof. These cha
 | Credential selection | Only IDs present in the current unlocked cache can be read. No arbitrary-item CLI fallback. Preview mode cannot unlock/access the real vault. |
 | Clipboard | No retained plaintext comparison copy; native writes carry Windows history/cloud/monitor-exclusion privacy flags. Clear app-owned data after 30 seconds and on revocation; use owner/sequence checks to preserve a later user copy. Retry busy clipboard cleanup. |
 | Typing | Check original process identity, foreground window, title, that keyboard focus is inside the destination window, modifier state, and live authorization before every keystroke. Abort when any changes or Windows blocks input. Focus is checked at window scope rather than one exact control because embedded browsers (CEF, WebView2) move focus between their own child windows while handling input. Username-only and password-only modes type a single field for two-step logins. Validate control characters/size before typing; no automatic clipboard fallback on failure. |
-| Errors/logging | Generic CLI errors; raw stdout/stderr and secrets are not echoed. Performance trace includes command name and elapsed time only. |
+| Sign-in | Email + master password (`--passwordenv`) or personal API key (`BW_CLIENTID`/`BW_CLIENTSECRET`), passed only through the CLI child environment, never as arguments. Two-step codes are short-lived and passed as `--code`. A password sign-in's session key is read from the CLI's JSON response directly into protected memory, without creating a string. API key sign-in leaves the vault locked until the master password is entered. |
+| Server choice | bitwarden.com, bitwarden.eu or a self-hosted HTTPS URL without credentials, query or fragment. Switching requires signing out first (the CLI enforces this too), so a vault session never moves between servers. |
+| Updates | Daily check (can be turned off) of this repository's latest GitHub release. Pre-releases, other repositories and non-`github.com` asset URLs are rejected. The download is size-limited, its SHA-256 must match the release's `SHA256SUMS.txt`, and the extracted exe must report the release version before it replaces the running app. The previous exe is kept until the new one starts and is restored on failure. Development builds never update automatically. |
+| Errors/logging | CLI failures show only the CLI's own short error message from its JSON response (e.g. "Username or password is incorrect"); raw output and secrets are not echoed. Performance trace includes command name and elapsed time only. |
 | Resource limits | CLI timeouts, bounded stdout/stderr, bounded JSON depth, login count, password and metadata lengths; malformed responses and duplicate login IDs are rejected. |
 
 ## Plaintext and remaining limits
@@ -32,6 +35,8 @@ No desktop password tool can be guaranteed 100% malware or hack proof. These cha
 * Process-bound memory encryption is defense in depth, not a boundary against code executing inside this process or malware with access to the user's process/account. The CLI also necessarily decrypts data in its own process. See [Microsoft's memory-protection limits](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectmemory).
 * Native window title/focus checks cannot authenticate a browser's URL, page origin, or DOM field. A malicious page can imitate a title or receive typed credentials; a focus race between the check and input is still possible. Ranking is a convenience, not authorization to trust a destination. Review the actual page/app before selecting a login.
 * OS event handling is best effort. Abrupt process death, a lost system event, or OS compromise cannot be made safe by application code alone. Windows Forms idle checking can be delayed while its UI thread is occupied. Credential revocation on delivered Windows lock/suspend events is immediate and independent of that timer.
+* The update checksum comes from the same GitHub release as the download, so it detects corruption and mirror tampering but not a compromised GitHub account or repository; anyone able to publish a release could ship a malicious update. The release's build provenance attestation (`gh attestation verify`) is a stronger check, but the app does not verify it itself. Turn off automatic update checks and build from source if that risk matters to you.
+* Settings (`%APPDATA%\BwPicker\settings.json`) and the autostart entry (`HKCU\...\Run`) hold no secrets. Autostart is only re-pointed at a different exe when the one it names no longer exists.
 * This local build is not publisher-signed or protected by an installer ACL. A malicious process with write access to the checkout/build output could replace it. Signed distribution, protected install locations, Windows updates, endpoint protection, and Bitwarden account protections remain operational controls.
 * Hardened CLI environment handling intentionally does not inherit custom proxy/CA or Node options. Private-CA installations may require a supported, reviewed trust configuration; bypassing TLS verification is rejected.
 
@@ -48,10 +53,10 @@ The default tests use fake CLI data and simulated keyboard input. Native clipboa
 ## Repeatable checks
 
 ```powershell
-dotnet build -c Release
-dotnet run --project tests\BwPicker.Tests.csproj
-dotnet tests\bin\Debug\net10.0-windows\BwPicker.Tests.dll --verify-cli
-dotnet list BwPicker.csproj package --vulnerable --include-transitive
+dotnet build BwPicker.sln -c Release
+dotnet run --project tests\BwPicker.Tests
+dotnet run --project tests\BwPicker.Tests -- --verify-cli
+dotnet list BwPicker.sln package --vulnerable --include-transitive
 ```
 
 Exit the running app before rebuilding its executable. `--verify-cli` performs read-only status access to the user's actual CLI profile; the default regression suite never accesses the real vault or types/copies secrets into another app.

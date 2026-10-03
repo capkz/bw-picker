@@ -79,8 +79,8 @@ sealed class UnlockForm : ThemedForm
                 server = Uri.TryCreate(account.ServerUrl, UriKind.Absolute, out var uri) ? uri.Host : "bitwarden.com";
                 if (account.Status == "unauthenticated")
                 {
-                    unlock.Enabled = password.Enabled = false;
-                    SetMessage("Run bw login in a terminal to sign in first.", error: true);
+                    DialogResult = DialogResult.Retry; // the caller shows the sign-in window instead
+                    return;
                 }
                 Invalidate();
             }
@@ -191,76 +191,6 @@ sealed class UnlockForm : ThemedForm
             bodyFont.Dispose();
             fieldFont.Dispose();
         }
-        base.Dispose(disposing);
-    }
-}
-
-/// <summary>Flat Fluent button: accent-filled when primary, neutral surface otherwise.</summary>
-sealed class FlatButton : Control
-{
-    readonly Theme theme;
-    readonly bool primary;
-    readonly DpiFont buttonFont;
-    bool hovered, pressed;
-
-    public FlatButton(Theme theme, bool primary)
-    {
-        this.theme = theme;
-        this.primary = primary;
-        buttonFont = primary ? new(Theme.Semibold, 9.5f) : new(Theme.Body, 9.5f);
-        RestoreFont(DeviceDpi);
-        Cursor = Cursors.Hand;
-        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-        SetStyle(ControlStyles.Selectable, true);
-        TabStop = true;
-    }
-
-    public void RestoreFont(int dpi) { buttonFont.SetDpi(dpi); Font = buttonFont; }
-
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-        g.Clear(theme.Background);
-
-        Color fill = primary ? theme.Accent : theme.Surface;
-        if (!Enabled) fill = Theme.Blend(fill, theme.Background, 0.45f);
-        else if (pressed) fill = Theme.Blend(fill, theme.Background, 0.25f);
-        else if (hovered) fill = Theme.Blend(fill, theme.Dark ? Color.White : Color.Black, 0.06f);
-
-        float radius = Height * 0.23f;
-        var bounds = new RectangleF(.5f, .5f, Width - 1, Height - 1);
-        Theme.FillRounded(g, fill, bounds, radius);
-        if (!primary) Theme.DrawRounded(g, theme.Border, bounds, radius);
-        if (Focused) Theme.DrawRounded(g, theme.Accent, new RectangleF(2.5f, 2.5f, Width - 5, Height - 5), radius);
-
-        Color text = primary ? theme.OnAccent : theme.Text;
-        if (!Enabled) text = Theme.Blend(text, theme.Background, 0.5f);
-        TextRenderer.DrawText(g, Text, Font, ClientRectangle, text,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
-    }
-
-    protected override void OnMouseEnter(EventArgs e) { hovered = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
-    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        if (e.KeyCode is Keys.Space or Keys.Enter)
-        {
-            e.SuppressKeyPress = true;
-            OnClick(EventArgs.Empty);
-        }
-        base.OnKeyDown(e);
-    }
-    protected override void OnMouseLeave(EventArgs e) { hovered = pressed = false; Invalidate(); base.OnMouseLeave(e); }
-    protected override void OnMouseDown(MouseEventArgs e) { pressed = true; Invalidate(); base.OnMouseDown(e); }
-    protected override void OnMouseUp(MouseEventArgs e) { pressed = false; Invalidate(); base.OnMouseUp(e); }
-    protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
-    protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing) buttonFont.Dispose();
         base.Dispose(disposing);
     }
 }

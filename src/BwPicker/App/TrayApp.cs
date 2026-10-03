@@ -11,6 +11,11 @@ sealed class TrayApp : ApplicationContext
     static readonly TimeSpan AutoLockAfter = TimeSpan.FromMinutes(15);
 
     readonly BwClient bw = new();
+    readonly AppSettings settings = AppSettings.Load();
+    readonly Updater updater;
+    readonly System.Windows.Forms.Timer updateTimer;
+    SettingsForm? settingsForm;
+    Version? announcedUpdate;
     readonly NotifyIcon tray;
     readonly HotkeyWindow hotkeyWindow;
     readonly System.Windows.Forms.Timer lockTimer;
@@ -23,13 +28,16 @@ sealed class TrayApp : ApplicationContext
     public TrayApp()
     {
         _ = dispatcher.Handle;
-        var startup = new ToolStripMenuItem("Start with Windows") { Checked = Startup.Enabled, CheckOnClick = true };
-        startup.CheckedChanged += (_, _) => Startup.Enabled = startup.Checked;
+        updater = new Updater(settings);
+        updater.ReadyToInstall += (_, exe) => InstallUpdate(exe);
 
         var menu = new ContextMenuStrip();
+        var settingsItem = menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
+        settingsItem.Font = new Font(settingsItem.Font, FontStyle.Bold);
+        menu.Items.Add("Check for updates", null, async (_, _) => { await updater.Check(manual: true); AnnounceUpdate(manual: true); });
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Sync vault", null, async (_, _) => await Sync());
         menu.Items.Add("Lock", null, async (_, _) => await Lock());
-        menu.Items.Add(startup);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, async (_, _) => await Shutdown());
 
@@ -40,6 +48,8 @@ sealed class TrayApp : ApplicationContext
             ContextMenuStrip = menu,
             Visible = true,
         };
+        tray.DoubleClick += (_, _) => ShowSettings();
+        tray.BalloonTipClicked += (_, _) => { if (announcedUpdate != null) ShowSettings(); };
 
         hotkeyWindow = new HotkeyWindow(id => { if (id == HotkeyId) OnHotkey(); });
         if (!Native.RegisterHotKey(hotkeyWindow.Handle, HotkeyId, HotkeyModifiers, (uint)HotkeyKey))
@@ -56,6 +66,62 @@ sealed class TrayApp : ApplicationContext
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         using var warmFont = Theme.Body(9.5f, 96);
         _ = WarmStatus();
+
+        // First check shortly after startup, then hourly to see whether the daily check is due.
+        updateTimer = new System.Windows.Forms.Timer { Interval = 20_000 };
+        updateTimer.Tick += async (_, _) =>
+        {
+            updateTimer.Interval = 60 * 60 * 1000;
+            if (!updater.CheckIsDue) return;
+            await updater.Check(manual: false);
+            AnnounceUpdate(manual: false);
+        };
+        updateTimer.Start();
+
+        if (!settings.Welcomed)
+        {
+            Notify($"BwPicker is in your tray. Press {HotkeyLabel} over a login screen; double-click the icon for settings.", ToolTipIcon.Info);
+            settings.Welcomed = true;
+            try { settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    void ShowSettings()
+    {
+        if (shuttingDown) return;
+        if (settingsForm is { IsDisposed: false })
+        {
+            if (settingsForm.WindowState == FormWindowState.Minimized) settingsForm.WindowState = FormWindowState.Normal;
+            settingsForm.Activate();
+            return;
+        }
+        settingsForm = new SettingsForm(bw, settings, updater, Notify);
+        settingsForm.FormClosed += (_, _) => { settingsForm?.Dispose(); settingsForm = null; };
+        settingsForm.Show();
+    }
+
+    void AnnounceUpdate(bool manual)
+    {
+        if (updater.Available is { } release && (manual || announcedUpdate != release.Version))
+        {
+            announcedUpdate = release.Version;
+            Notify($"BwPicker {release.Version.ToString(3)} is available. Click here or open Settings to install it.", ToolTipIcon.Info);
+        }
+        else if (manual) Notify(updater.Status, ToolTipIcon.Info);
+    }
+
+    async void InstallUpdate(string exe)
+    {
+        try
+        {
+            Updater.InstallAndRelaunch(exe);
+            await Shutdown();
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            Notify("Update failed. " + e.Message, ToolTipIcon.Error);
+            await updater.Check(manual: false);
+        }
     }
 
     async Task WarmStatus()
@@ -92,8 +158,17 @@ sealed class TrayApp : ApplicationContext
 
     bool Unlock()
     {
-        using var form = new UnlockForm(bw);
-        return form.ShowDialog() == DialogResult.OK;
+        if (bw.CachedStatus?.Status != "unauthenticated")
+        {
+            using var form = new UnlockForm(bw);
+            var result = form.ShowDialog();
+            if (result != DialogResult.Retry) return result == DialogResult.OK; // Retry: the CLI isn't signed in
+        }
+        using (var signIn = new SignInForm(bw, ServerChoice.FromStatus(bw.CachedStatus?.ServerUrl).DisplayName))
+            if (signIn.ShowDialog() != DialogResult.OK) return false;
+        if (bw.Unlocked) return true;
+        using var unlock = new UnlockForm(bw); // API key sign-in leaves the vault locked
+        return unlock.ShowDialog() == DialogResult.OK;
     }
 
     async Task Sync(bool quiet = false)
@@ -158,6 +233,8 @@ sealed class TrayApp : ApplicationContext
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         lockTimer.Stop();
+        updateTimer.Stop();
+        settingsForm?.Close();
         Native.UnregisterHotKey(hotkeyWindow.Handle, HotkeyId);
         hotkeyWindow.Dispose();
         try { var task = bw.Lock(); SecureClipboard.ClearOwned(); await task; }
@@ -180,7 +257,7 @@ sealed class TrayApp : ApplicationContext
             SystemEvents.SessionSwitch -= OnSessionSwitch;
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             bw.Dispose(); SecureClipboard.ClearOwned();
-            lockTimer.Dispose(); tray.Dispose(); hotkeyWindow.Dispose(); dispatcher.Dispose();
+            lockTimer.Dispose(); updateTimer.Dispose(); tray.Dispose(); hotkeyWindow.Dispose(); dispatcher.Dispose();
         }
         base.Dispose(disposing);
     }
@@ -203,26 +280,5 @@ sealed class TrayApp : ApplicationContext
         }
 
         public void Dispose() => DestroyHandle();
-    }
-}
-
-static class Startup
-{
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string ValueName = "BwPicker";
-
-    public static bool Enabled
-    {
-        get
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(ValueName) != null;
-        }
-        set
-        {
-            using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-            if (value) key.SetValue(ValueName, $"\"{Environment.ProcessPath}\"");
-            else key.DeleteValue(ValueName, throwOnMissingValue: false);
-        }
     }
 }

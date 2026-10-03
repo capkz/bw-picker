@@ -34,11 +34,101 @@ static class Tests
             }
             ClientChecks().GetAwaiter().GetResult();
             SecurityChecks().GetAwaiter().GetResult();
+            AccountChecks().GetAwaiter().GetResult();
+            UpdateChecks();
             LayoutChecks();
             Console.WriteLine("PASS: all regression checks.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    static async Task AccountChecks()
+    {
+        // Official servers map to the CLI's names; self-hosted must be HTTPS without credentials.
+        Assert(ServerChoice.FromStatus(null).Kind == ServerKind.BitwardenUs, "Default server is not US cloud");
+        Assert(ServerChoice.FromStatus("https://vault.bitwarden.eu").CliValue == ServerChoice.EuUrl, "EU cloud not recognized");
+        Assert(new ServerChoice(ServerKind.BitwardenUs).CliValue == "bitwarden.com", "US cloud CLI value wrong");
+        Assert(ServerChoice.SelfHosted("vault.example.com/").Url == "https://vault.example.com", "Self-hosted URL not normalized");
+        foreach (string bad in new[] { "http://vault.example.com", "https://user:pw@vault.example.com", "", "https://vault.example.com/?x=1" })
+            await Throws(() => { ServerChoice.SelfHosted(bad); return Task.CompletedTask; });
+
+        string session = new string('A', 86) + "==";
+        var responses = new Queue<(int Code, string Stdout)>();
+        var seen = new List<string[]>();
+        using var client = new BwClient((_, args) =>
+        {
+            seen.Add(args);
+            if (args[0] == "status") return Task.FromResult((0, """{"status":"unauthenticated"}""", ""));
+            var (code, stdout) = responses.Count > 0 ? responses.Dequeue() : (0, "");
+            return Task.FromResult((code, stdout, ""));
+        });
+        using var password = new MemorySecret("master".AsSpan());
+
+        responses.Enqueue((1, """{"success":false,"message":"Login failed. No provider selected."}"""));
+        Assert(await client.SignIn("you@example.com", password) == SignInOutcome.NeedsMethod, "Multiple 2FA providers not detected");
+        responses.Enqueue((1, """{"success":false,"message":"Code is required."}"""));
+        Assert(await client.SignIn("you@example.com", password, TwoStepMethod.Email) == SignInOutcome.NeedsCode, "Missing 2FA code not detected");
+        Assert(seen[^1].SequenceEqual(["login", "you@example.com", "--passwordenv", "BWPICKER_PW", "--method", "1", "--response"]),
+            "Login arguments are wrong or contain the password");
+        responses.Enqueue((1, """{"success":false,"message":"Code is required."}"""));
+        await Throws(async () => await client.SignIn("you@example.com", password, TwoStepMethod.Authenticator, "123456")); // new-device check
+        responses.Enqueue((1, """{"success":false,"message":"Username or password is incorrect. Try again."}"""));
+        await Throws(async () => await client.SignIn("you@example.com", password));
+        responses.Enqueue((0, $$$"""{"success":true,"data":{"object":"message","title":"You are logged in!","raw":"{{{session}}}"}}"""));
+        Assert(await client.SignIn("you@example.com", password, TwoStepMethod.Authenticator, "123456") == SignInOutcome.SignedIn && client.Unlocked,
+            "Successful password sign-in did not unlock");
+        await Throws(async () => await client.SignIn("not-an-email", password));
+
+        using var apiClient = new BwClient((_, args) => Task.FromResult(args[0] == "status"
+            ? (0, """{"status":"unauthenticated"}""", "") : (0, """{"success":true,"data":{"title":"You are logged in!"}}""", "")));
+        using var id = new MemorySecret("user.id".AsSpan());
+        using var secret = new MemorySecret("secret".AsSpan());
+        Assert(await apiClient.SignInWithApiKey(id, secret) == SignInOutcome.NeedsUnlock && !apiClient.Unlocked,
+            "API key sign-in should leave the vault locked");
+
+        using var signedIn = new BwClient((_, args) => Task.FromResult(args[0] == "status"
+            ? (0, """{"status":"locked","userEmail":"you@example.com"}""", "") : (0, """{"success":true}""", "")));
+        await Throws(() => signedIn.SetServer(new ServerChoice(ServerKind.BitwardenEu))); // must sign out first
+
+        string settingsPath = Path.Combine(Path.GetTempPath(), $"bwpicker-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            new AppSettings { CheckForUpdates = false, Welcomed = true }.Save(settingsPath);
+            var loaded = AppSettings.Load(settingsPath);
+            Assert(!loaded.CheckForUpdates && loaded.Welcomed, "Settings did not round-trip");
+            File.WriteAllText(settingsPath, "{ not json");
+            Assert(AppSettings.Load(settingsPath).CheckForUpdates, "Corrupt settings did not fall back to defaults");
+        }
+        finally { File.Delete(settingsPath); }
+        Console.WriteLine("PASS: server choice, password/2FA/API key sign-in outcomes, sign-out-before-switch, settings storage.");
+    }
+
+    static void UpdateChecks()
+    {
+        static string Release(string tag, bool prerelease = false, string host = "github.com") => $$"""
+            {"tag_name":"{{tag}}","draft":false,"prerelease":{{(prerelease ? "true" : "false")}},
+             "html_url":"https://github.com/capkz/bw-picker/releases/tag/{{tag}}",
+             "assets":[{"name":"BwPicker-win-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-win-x64.zip"},
+                       {"name":"SHA256SUMS.txt","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/SHA256SUMS.txt"}]}
+            """;
+        var current = new Version(1, 2, 0);
+        Assert(Updater.ParseRelease(Release("v1.3.0"), current)?.Version == new Version(1, 3, 0), "Newer release not offered");
+        Assert(Updater.ParseRelease(Release("v1.2.0"), current) == null, "Same version offered as an update");
+        Assert(Updater.ParseRelease(Release("v1.1.9"), current) == null, "Older version offered as an update");
+        Assert(Updater.ParseRelease(Release("v2.0.0", prerelease: true), current) == null, "Prerelease offered");
+        bool rejected = false;
+        try { Updater.ParseRelease(Release("v9.0.0", host: "evil.example.com"), current); } catch (InvalidOperationException) { rejected = true; }
+        Assert(rejected, "Release asset outside github.com/capkz/bw-picker accepted");
+
+        string hash = new string('a', 64);
+        Assert(Updater.ParseChecksum($"{hash}  BwPicker-win-x64.zip\n", "BwPicker-win-x64.zip").Length == 32, "Checksum not parsed");
+        Assert(Updater.ParseChecksum($"{new string('b', 64)} *other.zip\n{hash} *BwPicker-win-x64.zip", "BwPicker-win-x64.zip")[0] == 0xAA,
+            "Checksum for the wrong file used");
+        rejected = false;
+        try { Updater.ParseChecksum($"{hash}  other.zip", "BwPicker-win-x64.zip"); } catch (InvalidOperationException) { rejected = true; }
+        Assert(rejected, "Missing checksum accepted");
+        Console.WriteLine("PASS: release version/prerelease/origin checks and checksum parsing.");
     }
 
     static async Task ClientChecks()

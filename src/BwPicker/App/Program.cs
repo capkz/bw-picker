@@ -10,16 +10,28 @@ static class Program
             ApplicationConfiguration.Initialize();
             if (args.Contains("--dark")) Theme.ForceDark = true;
             if (args.Contains("--light")) Theme.ForceDark = false;
-            ShowPreview(args.Contains("--unlock"), args.SkipWhile(a => a != "--snapshot").Skip(1).FirstOrDefault(),
-                args.SkipWhile(a => a != "--query").Skip(1).FirstOrDefault());
+            string? snapshot = args.SkipWhile(a => a != "--snapshot").Skip(1).FirstOrDefault();
+            if (args.Contains("--settings")) ShowSettingsPreview(snapshot);
+            else if (args.Contains("--signin")) Run(() => new SignInForm(BwClient.Preview([]), "vault.example.com", "you@example.com"), snapshot);
+            else ShowPreview(args.Contains("--unlock"), snapshot, args.SkipWhile(a => a != "--query").Skip(1).FirstOrDefault());
             return;
         }
 
+        // After a self-update, wait for the previous instance to exit before taking the single-instance lock.
+        Updater.FinishUpdate(args);
         using var mutex = new Mutex(true, "BwPicker.SingleInstance", out bool first);
         if (!first) return;
 
+        try { Startup.Refresh(); } catch (UnauthorizedAccessException) { } catch (System.Security.SecurityException) { }
         ApplicationConfiguration.Initialize();
         Application.Run(new TrayApp());
+    }
+
+    static void ShowSettingsPreview(string? snapshot)
+    {
+        var settings = new AppSettings { LastUpdateCheck = DateTimeOffset.Now.AddHours(-3) };
+        var status = new BwStatus("locked", "you@example.com", "https://vault.example.com");
+        Run(() => new SettingsForm(BwClient.Preview([]), settings, new Updater(settings), (_, _) => { }, status), snapshot);
     }
 
     static void ShowPreview(bool unlock, string? snapshot, string? query)

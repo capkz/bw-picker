@@ -1,7 +1,7 @@
 Run the Windows regression checks with:
 
 ```powershell
-dotnet run --project tests\BwPicker.Tests.csproj
+dotnet run --project tests\BwPicker.Tests
 ```
 
 Exit the running tray app before rebuilding its executable.
@@ -13,7 +13,7 @@ Security checks cover encrypted memory and zeroing, unsigned CLI rejection, sani
 To verify the installed CLI signature and read-only status access with the hardened environment, explicitly run:
 
 ```powershell
-dotnet tests\bin\Debug\net10.0-windows\BwPicker.Tests.dll --verify-cli
+dotnet run --project tests\BwPicker.Tests -- --verify-cli
 ```
 
 This optional check accesses your actual CLI profile but does not unlock or read vault items. See `SECURITY.md` for the review scope, remaining risks, and manual integration checks.

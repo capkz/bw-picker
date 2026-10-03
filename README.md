@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/bw-picker.png" width="72" alt=""></p>
+<p align="center"><img src="docs/icon.png" width="72" alt=""></p>
 
 # BwPicker
 
@@ -6,7 +6,7 @@ A keyboard-driven picker that types your Bitwarden logins into **any Windows app
 
 > **Unofficial.** BwPicker is an independent project and is not affiliated with, endorsed by, or supported by Bitwarden Inc. It uses the official, signed [Bitwarden CLI](https://bitwarden.com/help/cli/) for all vault access.
 
-<p align="center"><img src="assets/screenshot.png" width="600" alt="BwPicker search popup over an app, listing matching logins"></p>
+<p align="center"><img src="docs/screenshot.png" width="600" alt="BwPicker search popup over an app, listing matching logins"></p>
 
 ## Why
 
@@ -18,9 +18,11 @@ The Bitwarden browser extension only fills web pages. The desktop app's Autotype
 - **Ranks logins for that app** by its process name and window title (Discord → logins named or hosted at "discord"). No URI tagging needed.
 - **Two-step logins**: type the username and password together, or each on its own for sign-ins that ask for them on separate pages.
 - **Copy** the username or password instead, kept out of Windows clipboard history and cleared after 30 seconds.
-- **Follows Windows** light/dark mode and accent color.
+- **Settings window**: start with Windows, choose bitwarden.com, bitwarden.eu or your self-hosted server (including Vaultwarden), and sign in or out. No terminal needed.
+- **Sign in** with email, master password and a two-step code (authenticator, email or YubiKey), or with a personal API key.
+- **Updates itself** from GitHub Releases after checking the download's SHA-256 checksum. Checks daily; you can turn it off.
+- **Follows Windows** light/dark mode.
 - **Locks automatically** after 15 minutes idle, and immediately when Windows locks, sleeps or signs out.
-- Works with bitwarden.com, bitwarden.eu and self-hosted servers (including Vaultwarden) over HTTPS.
 
 | Key | Action |
 |---|---|
@@ -44,16 +46,14 @@ winget install Bitwarden.CLI
 
 ## Setup
 
-1. Point the CLI at your server (skip this for bitwarden.com):
-   ```powershell
-   bw config server https://vault.example.com
-   ```
-2. Log in once in a terminal (this is where 2FA happens):
-   ```powershell
-   bw login
-   ```
-3. Start BwPicker. It sits in the system tray; right-click it to enable **Start with Windows**.
-4. Click into an app's login field and press `Ctrl+Alt+B`. The first time it asks for your master password.
+1. Start BwPicker. It sits in the system tray; double-click the icon to open **Settings**.
+2. Under **Account**, choose your server (bitwarden.com, bitwarden.eu or self-hosted) and sign in.
+3. Turn on **Start with Windows** if you want it running all the time.
+4. Click into an app's login field and press `Ctrl+Alt+B`. After the vault auto-locks, it asks for your master password again.
+
+<p align="center"><img src="docs/settings.png" width="420" alt="BwPicker settings: start with Windows, server and account, updates"></p>
+
+**New-device check:** Bitwarden's cloud may email a one-time code when you sign in from a new device. The CLI only accepts that code interactively, so if sign-in reports it, either choose **Use an API key instead** (web vault → Settings → Security → Keys) or run `bw login` once in a terminal.
 
 ## Install
 
@@ -63,39 +63,54 @@ Download the zip from [Releases](../../releases). Releases are built by GitHub A
 gh attestation verify BwPicker-win-x64.zip --repo capkz/bw-picker
 ```
 
-The executable is not code-signed, so Windows SmartScreen may warn on first run. Building from source is the most trustworthy option:
+Unzip it into a folder you can write to, such as `%LOCALAPPDATA%\Programs\BwPicker`, so it can update itself. The executable is not code-signed, so Windows SmartScreen may warn on first run. Building from source is the most trustworthy option:
 
 ```powershell
 git clone https://github.com/capkz/bw-picker
 cd bw-picker
-dotnet build -c Release
-.\bin\Release\net10.0-windows\BwPicker.exe
+dotnet build BwPicker.sln -c Release
+.\src\BwPicker\bin\Release\net10.0-windows\BwPicker.exe
 ```
+
+Builds from source report version `0.0.0-dev` and never update themselves.
 
 ## Security
 
 Read [SECURITY.md](SECURITY.md) before relying on this with important accounts. In short:
 
 - BwPicker does **no cryptography or vault storage of its own**. Unlocking, syncing and decryption are done by the official CLI, which it launches with a cleaned-up environment after verifying its signature.
-- The master password is passed to the CLI through an environment variable, never on the command line. The session key and cached passwords are encrypted in memory and wiped when the vault locks.
+- The master password and API key reach the CLI through environment variables, never on the command line. The session key and cached passwords are encrypted in memory and wiped when the vault locks.
 - Typing checks, before every keystroke, that the same app is still in front with focus inside it, and that no modifier keys are held. It stops if anything changes.
+- Updates come only from this repository's GitHub releases and must match the release's SHA-256 checksum.
 
 What it **cannot** protect against:
 
 - **It can't verify where it's typing.** It checks the window, process and title, not a web page's real origin. If you pick a login while a fake window is in front, it will type into that window. You choosing the login is the safeguard.
 - Malware already running as your Windows user, keyloggers, or a compromised destination app.
+- A compromised GitHub account publishing a malicious release. Turn off update checks and build from source if that matters to you.
 - Antivirus heuristics: a global hotkey plus simulated typing looks like a keylogger, so some products may flag it.
 
 The security review in SECURITY.md was AI-assisted and has not been independently audited. Reports are welcome; please open a private [security advisory](../../security/advisories/new) rather than a public issue.
 
 ## Development
 
-```powershell
-dotnet run --project tests\BwPicker.Tests.csproj   # regression checks; fake CLI, never touches your vault
-dotnet run -- --preview --dark                      # UI with sample data; also --light, --unlock, --query <text>
+```
+src/BwPicker/
+  App/       entry point, tray app, settings storage, autostart
+  Vault/     Bitwarden CLI client, sign-in and server choice, protected memory, vault parsing
+  Input/     window matching, guarded typing, clipboard
+  UI/        theme, controls, picker, unlock, sign-in and settings windows
+  Updates/   GitHub release check and self-update
+tests/BwPicker.Tests/   regression checks with a fake CLI
 ```
 
-Exit the running tray app before rebuilding. See [tests/README.md](tests/README.md) for what the checks cover.
+```powershell
+dotnet build BwPicker.sln -c Release
+dotnet run --project tests\BwPicker.Tests                   # never touches your vault or keyboard
+dotnet run --project src\BwPicker -- --preview --dark        # sample-data UI; also --light, --unlock, --settings, --signin, --query <text>
+```
+
+Exit the running tray app before rebuilding. To release, push a tag like `v1.2.3`: CI builds, tests, stamps that version into the app and publishes the release. See [tests/BwPicker.Tests/README.md](tests/BwPicker.Tests/README.md) for what the checks cover.
 
 ## License
 

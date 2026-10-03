@@ -24,7 +24,7 @@ sealed class CliOutput(int code, SensitiveBytes stdout) : IDisposable
 }
 
 /// <summary>Serial CLI access, immediate thread-safe revocation, and process-bound encrypted credentials.</summary>
-sealed class BwClient : IDisposable
+sealed partial class BwClient : IDisposable
 {
     readonly object state = new();
     readonly SemaphoreSlim commands = new(1, 1);
@@ -96,7 +96,7 @@ sealed class BwClient : IDisposable
         {
             await pendingCleanup;
             await Status();
-            using var output = await Run(masterPassword, started, "unlock", "--passwordenv", "BWPICKER_PW", "--raw");
+            using var output = await Run([("BWPICKER_PW", masterPassword)], started, "unlock", "--passwordenv", "BWPICKER_PW", "--raw");
             if (output.Code != 0) throw new InvalidOperationException("Unlock failed. Check your master password and Bitwarden account.");
             using var next = ParseSession(output.Stdout.Memory.Span);
             lock (state)
@@ -218,7 +218,7 @@ sealed class BwClient : IDisposable
         credentials.Clear();
     }
 
-    async Task<CliOutput> Run(MemorySecret? masterPassword, int? version, params string[] args)
+    async Task<CliOutput> Run(IReadOnlyList<(string Name, MemorySecret Value)>? secrets, int? version, params string[] args)
     {
         await commands.WaitAsync();
         var timer = Stopwatch.StartNew();
@@ -237,26 +237,35 @@ sealed class BwClient : IDisposable
                 var result = await commandRunner(null, args);
                 return new CliOutput(result.Code, new SensitiveBytes(Encoding.UTF8.GetBytes(result.Stdout)));
             }
-            return await RunProcess(masterPassword, key, cancellation, args);
+            return await RunProcess(secrets, key, cancellation, args);
         }
         finally { key?.Dispose(); Trace.WriteLine($"bw {args[0]}: {timer.ElapsedMilliseconds} ms"); commands.Release(); }
     }
 
-    async Task<CliOutput> RunProcess(MemorySecret? password, SecretLease? key, CancellationToken operation, string[] args)
+    // Secrets travel only through the child's environment, never its command line.
+    async Task<CliOutput> RunProcess(IReadOnlyList<(string Name, MemorySecret Value)>? secrets, SecretLease? key,
+        CancellationToken operation, string[] args)
     {
         using var executable = TrustedCli.Open();
         var psi = CliEnvironment.Create(executable.Path, args);
-        using var master = password?.Reveal();
+        var revealed = new List<SecretLease>();
         if (key != null) psi.Environment["BW_SESSION"] = new string(key.Characters);
-        if (master != null) psi.Environment["BWPICKER_PW"] = new string(master.Characters);
+        foreach (var (name, value) in secrets ?? [])
+        {
+            var lease = value.Reveal();
+            revealed.Add(lease);
+            psi.Environment[name] = new string(lease.Characters);
+        }
         Process process;
         try { operation.ThrowIfCancellationRequested(); process = Process.Start(psi)!; }
         catch (OperationCanceledException) { throw new InvalidOperationException("Vault was locked; the operation was cancelled."); }
         catch (Win32Exception) { throw new InvalidOperationException("Could not start the verified Bitwarden CLI."); }
         finally
         {
-            psi.Environment.Remove("BW_SESSION"); psi.Environment.Remove("BWPICKER_PW");
-            key?.Dispose(); master?.Dispose();
+            psi.Environment.Remove("BW_SESSION");
+            foreach (var (name, _) in secrets ?? []) psi.Environment.Remove(name);
+            key?.Dispose();
+            foreach (var lease in revealed) lease.Dispose();
         }
         using (process)
         using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(operation))

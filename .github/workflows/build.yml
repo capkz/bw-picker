@@ -20,13 +20,13 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Build
-        run: dotnet build BwPicker.csproj -c Release
+        run: dotnet build BwPicker.sln -c Release
 
       - name: Regression checks
-        run: dotnet run --project tests/BwPicker.Tests.csproj
+        run: dotnet run --project tests/BwPicker.Tests -c Release --no-build
 
       - name: Vulnerable package check
-        run: dotnet list BwPicker.csproj package --vulnerable --include-transitive
+        run: dotnet list BwPicker.sln package --vulnerable --include-transitive
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -43,8 +43,14 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # The tag (v1.2.3) becomes the app version; the in-app updater compares against it.
       - name: Publish
-        run: dotnet publish BwPicker.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Release tags must look like v1.2.3" }
+          dotnet publish src/BwPicker/BwPicker.csproj -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=true -p:Version=$version -o publish
 
       - name: Package
         shell: pwsh
