@@ -86,6 +86,8 @@ Builds from source report version `0.0.0-dev` and never update themselves.
 
 ### Linux
 
+> **Beta.** Tested in VMs (Xfce on X11, GNOME 50 on Wayland) but not yet widely. Feedback welcome in the [Linux beta discussion](https://github.com/capkz/bw-picker/discussions/1).
+
 Download `BwPicker-linux-x64.zip`, unzip it and run the installer, which puts BwPicker in `~/.local/share/BwPicker` (so it can update itself), adds it to the applications menu and starts it:
 
 ```sh
