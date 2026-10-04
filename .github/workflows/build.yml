@@ -57,7 +57,8 @@ jobs:
         run: |
           Compress-Archive -Path publish/BwPicker.exe, LICENSE, README.md, SECURITY.md -DestinationPath BwPicker-win-x64.zip
           $hash = (Get-FileHash BwPicker-win-x64.zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  BwPicker-win-x64.zip" | Out-File SHA256SUMS.txt -Encoding ascii
+          # LF line endings so `sha256sum -c SHA256SUMS.txt` works on any platform.
+          [IO.File]::WriteAllText("SHA256SUMS.txt", "$hash  BwPicker-win-x64.zip`n")
 
       - uses: actions/attest-build-provenance@v2
         with:
