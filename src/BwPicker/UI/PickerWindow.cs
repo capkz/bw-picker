@@ -51,7 +51,7 @@ sealed class PickerWindow : PanelWindow
         ShowInTaskbar = false;
         Width = 600;
         SizeToContent = SizeToContent.Height;
-        WindowStartupLocation = WindowStartupLocation.Manual;
+        PlacedByCaller = true;
 
         var close = new Button
         {
@@ -103,6 +103,7 @@ sealed class PickerWindow : PanelWindow
         Opened += (_, _) =>
         {
             PlaceOverTarget();
+            Dispatcher.UIThread.Post(PlaceOverTarget, DispatcherPriority.Loaded); // again once the final size is known
             Activate();
             search.Focus();
             search.SelectAll();
@@ -122,16 +123,11 @@ sealed class PickerWindow : PanelWindow
         return row;
     }
 
-    /// <summary>Centered on the target window's monitor, a fifth of the way down.</summary>
+    /// <summary>As before the Avalonia port: centered on the target app's monitor, a fifth of the way down.</summary>
     void PlaceOverTarget()
     {
-        var screen = (Native.GetWindowRect(target.Handle, out var r) ? Screens.ScreenFromPoint(new PixelPoint((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2)) : null)
-            ?? Screens.Primary;
-        if (screen == null) return;
-        var area = screen.WorkingArea;
-        var size = PixelSize.FromSize(Bounds.Size, screen.Scaling);
-        Position = new PixelPoint(area.X + (area.Width - size.Width) / 2,
-            Math.Min(area.Y + area.Height / 5, Math.Max(area.Y, area.Bottom - size.Height - 16)));
+        var point = target.Bounds is { } r ? new PixelPoint((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2) : (PixelPoint?)null;
+        PlaceOnMonitor(point, 0.2);
     }
 
     void Rank()

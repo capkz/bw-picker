@@ -54,13 +54,38 @@ class PanelWindow : Window
         Background = new SolidColorBrush(P.Background);
         Foreground = new SolidColorBrush(P.Text);
         FontFamily = Ui.Font;
-        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        // Owner-less windows would otherwise open on the primary monitor; put them where the user is working.
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Opened += (_, _) =>
+        {
+            if (!PlacedByCaller)
+            {
+                PlaceOnMonitor(Native.GetCursorPos(out var cursor) ? new PixelPoint(cursor.X, cursor.Y) : null, 0.25);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => PlaceOnMonitor(Native.GetCursorPos(out var c) ? new PixelPoint(c.X, c.Y) : null, 0.25),
+                    Avalonia.Threading.DispatcherPriority.Loaded);
+            }
+        };
         RequestedThemeVariant = P.Dark ? ThemeVariant.Dark : ThemeVariant.Light;
         PointerPressed += (_, e) =>
         {
             if (e.Source is Panel or Border or TextBlock && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
                 BeginMoveDrag(e);
         };
+    }
+
+    /// <summary>Set by windows that position themselves (the picker, notifications).</summary>
+    protected bool PlacedByCaller { get; set; }
+
+    /// <summary>Centers horizontally on the monitor containing <paramref name="point"/> (physical pixels), at a fraction of its height.</summary>
+    protected void PlaceOnMonitor(PixelPoint? point, double fromTop)
+    {
+        var screen = (point is { } p ? Screens.ScreenFromPoint(p) : null) ?? Screens.Primary;
+        if (screen == null) return;
+        var area = screen.WorkingArea;
+        var size = PixelSize.FromSize(Bounds.Size, screen.Scaling);
+        int y = area.Y + (int)(area.Height * fromTop);
+        Position = new PixelPoint(area.X + (area.Width - size.Width) / 2,
+            Math.Clamp(y, area.Y, Math.Max(area.Y, area.Bottom - size.Height - (int)(16 * screen.Scaling))));
     }
 
     /// <summary>Shows the window and completes when it closes, with its result. Tray apps have no owner to be modal over.</summary>

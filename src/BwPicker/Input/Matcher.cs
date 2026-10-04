@@ -12,6 +12,9 @@ sealed record WindowContext(IntPtr Handle, string ProcessName, string AppName, s
     /// <summary>The target runs as administrator and this app doesn't, so typed input would be discarded.</summary>
     public bool BlocksTyping { get; init; }
 
+    /// <summary>Screen rectangle of the window itself.</summary>
+    public Native.RECT? Bounds => Native.GetWindowRect(Handle, out var r) ? r : null;
+
     public bool HasOriginalIdentity()
     {
         if (ProcessId == 0 || StartedAt == 0 || !WindowStillMatches()) return false;

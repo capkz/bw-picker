@@ -20,7 +20,7 @@ sealed class Toast : PanelWindow
         ShowActivated = false;
         Width = 360;
         SizeToContent = SizeToContent.Height;
-        WindowStartupLocation = WindowStartupLocation.Manual;
+        PlacedByCaller = true;
 
         var accent = kind switch { Notice.Error => P.Critical, Notice.Warning => Color.Parse("#E0A43A"), _ => P.Accent };
         var stripe = new Border { Width = 3, CornerRadius = new CornerRadius(2), Background = Ui.Brush(accent), Margin = new Thickness(0, 2, 12, 2) };

@@ -43,6 +43,8 @@ sealed class TrayController : IDisposable
         menu.Items.Add(Item("Exit", async () => await Shutdown()));
         tray = new TrayIcon { Icon = Ui.AppIcon, ToolTipText = $"BwPicker ({HotkeyLabel})", Menu = menu, IsVisible = true };
         tray.Clicked += (_, _) => ShowSettings();
+        // Tray icons are owned by the application; register it so the platform keeps it alive and shown.
+        if (Avalonia.Application.Current is { } app) TrayIcon.SetIcons(app, [tray]);
 
         hotkey = new GlobalHotkey(HotkeyModifiers, HotkeyKey);
         hotkey.Pressed += () => Dispatcher.UIThread.Post(() => _ = OnHotkey());

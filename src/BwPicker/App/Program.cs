@@ -46,7 +46,19 @@ static partial class Program
         tray?.Dispose();
     }
 
-    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace();
+    public static AppBuilder BuildAvaloniaApp()
+    {
+        // Development builds log Avalonia warnings and unhandled errors to %TEMP%\BwPicker-debug.log (no vault data).
+        if (AppVersion.IsDevelopment)
+        {
+            var log = new System.Diagnostics.TextWriterTraceListener(Path.Combine(Path.GetTempPath(), "BwPicker-debug.log"));
+            System.Diagnostics.Trace.Listeners.Add(log);
+            System.Diagnostics.Trace.AutoFlush = true;
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => System.Diagnostics.Trace.WriteLine($"Unhandled: {e.ExceptionObject}");
+            TaskScheduler.UnobservedTaskException += (_, e) => System.Diagnostics.Trace.WriteLine($"Unobserved: {e.Exception}");
+        }
+        return AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace(Avalonia.Logging.LogEventLevel.Warning);
+    }
 
     // --preview [--dark|--light] [--unlock|--signin|--settings|--clisetup] [--query text] [--snapshot file.png]
     static void Preview(string[] args)
