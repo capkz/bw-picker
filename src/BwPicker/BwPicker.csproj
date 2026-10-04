@@ -3,8 +3,8 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <!--
-      One codebase, two builds: Windows (default) and Linux (`-r linux-x64`, or -p:TargetOS=linux). Shared code lives in
-      plain .cs files; platform services (hotkey, typing, clipboard, tray, autostart) in *.Windows.cs / *.Linux.cs.
+      One codebase, two builds: Windows (default) and Linux (`-r linux-x64`, or -p:TargetOS=linux). Shared code lives in the
+      usual folders; Platform/Windows and Platform/Linux hold each platform's services (hotkey, typing, clipboard, tray, autostart).
     -->
     <TargetOS Condition="'$(TargetOS)' == '' and $(RuntimeIdentifier.StartsWith('linux'))">linux</TargetOS>
     <TargetOS Condition="'$(TargetOS)' == ''">windows</TargetOS>
@@ -32,10 +32,10 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetOS)' == 'windows'">
-    <Compile Remove="**\*.Linux.cs" />
+    <Compile Remove="Platform\Linux\**" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetOS)' == 'linux'">
-    <Compile Remove="**\*.Windows.cs" />
+    <Compile Remove="Platform\Windows\**" />
   </ItemGroup>
 
   <ItemGroup>

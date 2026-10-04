@@ -13,6 +13,6 @@
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\..\src\BwPicker\BwPicker.csproj" /></ItemGroup>
   <ItemGroup Condition="'$(TargetOS)' == 'windows'">
-    <Compile Remove="**/*.Linux.cs" />
+    <Compile Remove="Platform/Linux/**" />
   </ItemGroup>
 </Project>

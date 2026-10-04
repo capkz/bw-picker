@@ -133,15 +133,18 @@ The security review in SECURITY.md was AI-assisted and has not been independentl
 
 ```
 src/BwPicker/
-  App/       entry point, tray app, settings storage, autostart
+  App/       entry point, tray app, settings storage
   Vault/     Bitwarden CLI client, sign-in and server choice, protected memory, vault parsing
-  Input/     window matching, guarded typing, clipboard
-  UI/        Avalonia windows: picker, unlock, sign-in, settings, CLI setup, notifications
+  Input/     window matching, guarded typing
+  UI/        Avalonia windows: picker, unlock, sign-in, settings, CLI setup
   Updates/   GitHub release check and self-update
+  Platform/
+    Windows/ hotkey, SendInput typing, clipboard, tray and notifications, autostart, admin mode, CLI signature check
+    Linux/   X11 and Wayland (portals, AT-SPI) hotkey and typing, clipboard, tray, DBus notifications, autostart, CLI checks
 tests/BwPicker.Tests/   regression checks with a fake CLI
 ```
 
-Platform services (hotkey, typing, clipboard, tray, autostart) live in `*.Windows.cs` and `*.Linux.cs` files; the Linux build is selected with `-p:TargetOS=linux` or `-r linux-x64`.
+Each build compiles the shared folders plus its own `Platform/` folder; the Linux build is selected with `-p:TargetOS=linux` or `-r linux-x64`.
 
 ```powershell
 dotnet build BwPicker.sln -c Release
