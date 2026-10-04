@@ -26,7 +26,7 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
     internal const string Repository = "capkz/bw-picker";
     internal const string PackageName = "BwPicker-win-x64.zip";
     const string ChecksumsName = "SHA256SUMS.txt";
-    const long MaxPackageBytes = 100 * 1024 * 1024;
+    const long MaxPackageBytes = 300 * 1024 * 1024; // self-contained single-file build
     static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
 
     readonly HttpClient http = http ?? CreateClient();

@@ -49,13 +49,13 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}".TrimStart('v')
           if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Release tags must look like v1.2.3" }
-          dotnet publish src/BwPicker/BwPicker.csproj -c Release -r win-x64 --self-contained false `
-            -p:PublishSingleFile=true -p:Version=$version -o publish
+          dotnet publish src/BwPicker/BwPicker.csproj -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:Version=$version -o publish
 
       - name: Package
         shell: pwsh
         run: |
-          Compress-Archive -Path publish/BwPicker.exe, LICENSE, README.md, SECURITY.md -DestinationPath BwPicker-win-x64.zip
+          Compress-Archive -Path publish/BwPicker.exe, scripts/Install-Admin.ps1, LICENSE, README.md, SECURITY.md -DestinationPath BwPicker-win-x64.zip
           $hash = (Get-FileHash BwPicker-win-x64.zip -Algorithm SHA256).Hash.ToLower()
           # LF line endings so `sha256sum -c SHA256SUMS.txt` works on any platform.
           [IO.File]::WriteAllText("SHA256SUMS.txt", "$hash  BwPicker-win-x64.zip`n")

@@ -247,7 +247,14 @@ static class Tests
         rejected = false;
         try { Updater.ParseChecksum($"{hash}  other.zip", "BwPicker-win-x64.zip"); } catch (InvalidOperationException) { rejected = true; }
         Assert(rejected, "Missing checksum accepted");
-        Console.WriteLine("PASS: release version/prerelease/origin checks and checksum parsing.");
+        // Admin autostart is only allowed from folders that need admin rights to change.
+        string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        Assert(Startup.InProtectedFolder(Path.Combine(pf, "BwPicker", "BwPicker.exe")), "Program Files not treated as protected");
+        Assert(!Startup.InProtectedFolder(Path.Combine(pf + " Evil", "BwPicker.exe")), "Lookalike 'Program Files Evil' treated as protected");
+        Assert(!Startup.InProtectedFolder(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "BwPicker", "BwPicker.exe")),
+            "User-writable folder treated as protected");
+        Assert(!Startup.InProtectedFolder(Path.Combine(pf, "..", "Users", "x.exe")), "Path traversal out of Program Files accepted");
+        Console.WriteLine("PASS: release version/prerelease/origin checks and checksum parsing; admin-autostart folder check.");
     }
 
     static async Task ClientChecks()

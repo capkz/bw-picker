@@ -9,14 +9,13 @@ sealed record WindowContext(IntPtr Handle, string ProcessName, string AppName, s
 {
     public uint ProcessId { get; init; }
     public long StartedAt { get; init; }
+    /// <summary>The target runs as administrator and this app doesn't, so typed input would be discarded.</summary>
+    public bool BlocksTyping { get; init; }
 
     public bool HasOriginalIdentity()
     {
         if (ProcessId == 0 || StartedAt == 0 || !WindowStillMatches()) return false;
-        try { using var process = Process.GetProcessById((int)ProcessId); return process.StartTime.ToUniversalTime().Ticks == StartedAt; }
-        catch (ArgumentException) { return false; }
-        catch (InvalidOperationException) { return false; }
-        catch (System.ComponentModel.Win32Exception) { return false; }
+        return ProcessInfo.Read(ProcessId)?.StartedAt == StartedAt;
     }
 
     public bool WindowStillMatches()
@@ -38,26 +37,27 @@ sealed record WindowContext(IntPtr Handle, string ProcessName, string AppName, s
     public static WindowContext From(IntPtr hwnd)
     {
         string title = ReadTitle(hwnd);
-        uint processId = 0;
-        long startedAt = 0;
-
+        Native.GetWindowThreadProcessId(hwnd, out uint pid);
+        var info = pid == 0 ? null : ProcessInfo.Read(pid);
         string process = "", appName = "";
-        try
+        if (info is { ImagePath.Length: > 0 } known)
         {
-            Native.GetWindowThreadProcessId(hwnd, out uint pid);
-            using var p = Process.GetProcessById((int)pid);
-            processId = pid;
-            startedAt = p.StartTime.ToUniversalTime().Ticks;
-            process = appName = p.ProcessName;
-            // "Discord", "Google Chrome", … Fails for elevated processes, which is fine.
-            var description = p.MainModule?.FileVersionInfo.FileDescription;
-            if (!string.IsNullOrWhiteSpace(description)) appName = description.Trim();
+            process = appName = Path.GetFileNameWithoutExtension(known.ImagePath);
+            try
+            {
+                // "Discord", "Google Chrome", …
+                var description = FileVersionInfo.GetVersionInfo(known.ImagePath).FileDescription;
+                if (!string.IsNullOrWhiteSpace(description)) appName = description.Trim();
+            }
+            catch (FileNotFoundException) { }
         }
-        catch (ArgumentException) { }
-        catch (InvalidOperationException) { }
-        catch (System.ComponentModel.Win32Exception) { }
-
-        return new WindowContext(hwnd, process, appName, title) { ProcessId = processId, StartedAt = startedAt };
+        return new WindowContext(hwnd, process, appName, title)
+        {
+            ProcessId = info == null ? 0 : pid,
+            StartedAt = info?.StartedAt ?? 0,
+            // Windows (UIPI) drops keystrokes from a non-admin app into an admin one.
+            BlocksTyping = !ProcessInfo.CurrentIsElevated && info?.Elevated != false && info != null,
+        };
     }
 }
 

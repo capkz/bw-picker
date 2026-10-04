@@ -307,6 +307,12 @@ sealed class PickerForm : ThemedForm
 
     void TypeInto(CredentialLease credential, TypeFields fields, bool submit)
     {
+        if (target.BlocksTyping)
+        {
+            notify($"{(target.AppName.Length > 0 ? target.AppName : "This app")} runs as administrator, so Windows blocks typing into it. " +
+                "Use Ctrl+U / Ctrl+P to copy instead, or install BwPicker for administrator apps (see README).", ToolTipIcon.Warning);
+            return;
+        }
         if (fields != TypeFields.UsernameOnly && (credential.Password == null || credential.Password.Characters.IsEmpty))
         {
             notify("This item has no password.", ToolTipIcon.Warning);

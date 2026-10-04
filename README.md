@@ -39,7 +39,7 @@ The Bitwarden browser extension only fills web pages. The desktop app's Autotype
 ## Requirements
 
 - Windows 10 or 11
-- [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) (or the SDK to build from source)
+- Nothing else for the release build (it includes its own .NET runtime); the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to build from source
 - The official Bitwarden CLI. BwPicker refuses to run a `bw.exe` that isn't signed by Bitwarden Inc.
 
 ```powershell
@@ -75,6 +75,17 @@ dotnet build BwPicker.sln -c Release
 ```
 
 Builds from source report version `0.0.0-dev` and never update themselves.
+
+### Apps that run as administrator
+
+Windows doesn't let a normal app type into an app running as administrator (some game launchers do), so BwPicker tells you to use `Ctrl+U` / `Ctrl+P` and paste instead. To have it type there too, install it with the included script:
+
+```powershell
+.\Install-Admin.ps1            # from the unzipped release; asks for administrator rights once
+.\Install-Admin.ps1 -Uninstall
+```
+
+It copies BwPicker to `C:\Program Files\BwPicker`, where only administrators can change it, and starts it as administrator at sign-in through a scheduled task (no UAC prompt each time). BwPicker refuses to set up admin autostart from any other folder: an admin app in a folder you can write to could be swapped by malware to gain admin rights. The trade-off is that BwPicker, the Bitwarden CLI it starts and its updater then run with administrator rights.
 
 ## Security
 

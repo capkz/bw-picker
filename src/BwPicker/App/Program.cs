@@ -25,7 +25,13 @@ static partial class Program
         using var mutex = new Mutex(true, "BwPicker.SingleInstance", out bool first);
         if (!first) return;
 
-        try { Startup.Refresh(); } catch (UnauthorizedAccessException) { } catch (System.Security.SecurityException) { }
+        try
+        {
+            // Install-Admin.ps1 starts the Program Files copy with this flag to set up admin autostart.
+            if (args.Contains("--enable-admin-autostart") && Startup.AdminMode) Startup.Enabled = true;
+            Startup.Refresh();
+        }
+        catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException) { }
         ApplicationConfiguration.Initialize();
         BwClient? client = null;
         CreateClient(args, ref client);

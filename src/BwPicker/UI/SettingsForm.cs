@@ -303,7 +303,7 @@ sealed class SettingsForm : ThemedForm
         DrawText(g, "Settings", titleFont, new Rectangle(S(68), S(20), S(300), S(32)), Theme.Text);
 
         Caption(g, "GENERAL", generalY);
-        Row(g, startupY, "Start with Windows", "Open BwPicker in the tray when you sign in", textWidth - S(56));
+        Row(g, startupY, "Start with Windows", Startup.AdminMode ? "As administrator, so it can type into admin apps" : "Open BwPicker in the tray when you sign in", textWidth - S(56));
         Row(g, shortcutY, "Shortcut", "Opens the picker over the app you're using", textWidth - S(140));
         DrawKeys(g, ["Ctrl", "Alt", "B"], width - pad, shortcutY + S(9));
 
