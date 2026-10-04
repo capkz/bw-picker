@@ -68,10 +68,13 @@ class PanelWindow : Window
         RequestedThemeVariant = P.Dark ? ThemeVariant.Dark : ThemeVariant.Light;
         PointerPressed += (_, e) =>
         {
-            if (e.Source is Panel or Border or TextBlock && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            if (Draggable && e.Source is Panel or Border or TextBlock && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
                 BeginMoveDrag(e);
         };
     }
+
+    /// <summary>Whether dragging empty space moves the window; off for notifications, which close on click.</summary>
+    protected bool Draggable { get; set; } = true;
 
     /// <summary>Set by windows that position themselves (the picker, notifications).</summary>
     protected bool PlacedByCaller { get; set; }

@@ -21,6 +21,7 @@ sealed class Toast : PanelWindow
         Width = 360;
         SizeToContent = SizeToContent.Height;
         PlacedByCaller = true;
+        Draggable = false;
 
         var accent = kind switch { Notice.Error => P.Critical, Notice.Warning => Color.Parse("#E0A43A"), _ => P.Accent };
         var stripe = new Border { Width = 3, CornerRadius = new CornerRadius(2), Background = Ui.Brush(accent), Margin = new Thickness(0, 2, 12, 2) };
@@ -34,7 +35,7 @@ sealed class Toast : PanelWindow
         Grid.SetColumn(text, 1); grid.Children.Add(text);
         Content = grid;
         Cursor = new Cursor(StandardCursorType.Hand);
-        PointerReleased += (_, _) => { onClick?.Invoke(); Close(); };
+        PointerPressed += (_, e) => { e.Handled = true; onClick?.Invoke(); Close(); };
 
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Clamp(3 + message.Length / 25.0, 4, 9)) };
         timer.Tick += (_, _) => { timer.Stop(); Close(); };
