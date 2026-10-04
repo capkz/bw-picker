@@ -47,6 +47,19 @@ New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item $Source $exe -Force
 Unblock-File $exe
 
+# BwPicker needs the official Bitwarden CLI for signing in and syncing.
+$bw = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\bw.exe'
+if (-not (Test-Path $bw) -and -not (Get-Command bw.exe -ErrorAction SilentlyContinue)) {
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+        $answer = Read-Host 'The Bitwarden CLI (needed to sign in and sync) is not installed. Install it now with winget? [Y/n]'
+        if ($answer -notmatch '^[Nn]') {
+            winget.exe install --id Bitwarden.CLI --exact --source winget --accept-package-agreements --accept-source-agreements --silent
+        }
+    } else {
+        Write-Host 'The Bitwarden CLI is not installed and winget is unavailable. Install it from https://bitwarden.com/help/cli/'
+    }
+}
+
 # The installed copy sets up the admin startup task itself, then keeps running in the tray.
 Start-Process $exe -ArgumentList '--enable-admin-autostart'
 Write-Host "Installed BwPicker $version to $target and set it to start as administrator at sign-in."

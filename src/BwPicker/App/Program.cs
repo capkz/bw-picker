@@ -15,6 +15,7 @@ static partial class Program
             if (args.Contains("--light")) Theme.ForceDark = false;
             string? snapshot = args.SkipWhile(a => a != "--snapshot").Skip(1).FirstOrDefault();
             if (args.Contains("--settings")) ShowSettingsPreview(snapshot);
+            else if (args.Contains("--clisetup")) Run(() => new CliSetupForm(), snapshot);
             else if (args.Contains("--signin")) Run(() => new SignInForm(BwClient.Preview([]), "vault.example.com", "you@example.com"), snapshot);
             else ShowPreview(args.Contains("--unlock"), snapshot, args.SkipWhile(a => a != "--query").Skip(1).FirstOrDefault());
             return;

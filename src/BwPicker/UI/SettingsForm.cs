@@ -131,6 +131,13 @@ sealed class SettingsForm : ThemedForm
     async Task RefreshAccount()
     {
         if (preview) return;
+        if (!TrustedCli.IsInstalled)
+        {
+            status = new BwStatus("unauthenticated", null, null);
+            SetAccountMessage("The Bitwarden CLI isn't installed. Sign in to set it up.", error: false);
+            ShowServer(status);
+            return;
+        }
         try { status = await bw.Status(); }
         catch (InvalidOperationException ex) { SetAccountMessage(ex.Message, error: true); }
         if (IsDisposed) return;
@@ -215,6 +222,7 @@ sealed class SettingsForm : ThemedForm
         }
         else
         {
+            if (!TrayApp.EnsureCli(this)) return;
             var target = ServerChoice.FromStatus(status?.ServerUrl);
             using (var signIn = new SignInForm(bw, target.DisplayName))
                 if (signIn.ShowDialog(this) != DialogResult.OK) return;

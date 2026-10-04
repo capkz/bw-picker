@@ -16,6 +16,9 @@ sealed class TrustedCli : IDisposable
     public string Path { get; }
     TrustedCli(FileStream file, string path) { this.file = file; Path = path; }
 
+    /// <summary>A bw.exe exists in a known location (its signature is still checked before every use).</summary>
+    public static bool IsInstalled => Candidates().Any(File.Exists);
+
     public static TrustedCli Open()
     {
         try { return OpenVerified(); }

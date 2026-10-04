@@ -160,6 +160,7 @@ sealed class TrayApp : ApplicationContext
 
     bool Unlock()
     {
+        if (!EnsureCli()) return false;
         if (bw.CachedStatus?.Status != "unauthenticated")
         {
             using var form = new UnlockForm(bw);
@@ -171,6 +172,14 @@ sealed class TrayApp : ApplicationContext
         if (bw.Unlocked) return true;
         using var unlock = new UnlockForm(bw); // API key sign-in leaves the vault locked
         return unlock.ShowDialog() == DialogResult.OK;
+    }
+
+    /// <summary>Offers to install the Bitwarden CLI when it's missing; false if it still isn't there.</summary>
+    internal static bool EnsureCli(IWin32Window? owner = null)
+    {
+        if (TrustedCli.IsInstalled) return true;
+        using var setup = new CliSetupForm();
+        return setup.ShowDialog(owner) == DialogResult.OK && TrustedCli.IsInstalled;
     }
 
     async Task Sync(bool quiet = false)
