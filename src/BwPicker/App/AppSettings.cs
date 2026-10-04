@@ -13,6 +13,9 @@ sealed class AppSettings
     /// <summary>Windows: run elevated from Program Files so typing reaches apps that run as administrator. On by default.</summary>
     public bool RunAsAdmin { get; set; } = true;
 
+    /// <summary>Set just before switching administrator mode, so the restarted instance reopens Settings and says so.</summary>
+    public bool ReopenSettingsAfterSwitch { get; set; }
+
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     internal static string DefaultPath => Path.Combine(

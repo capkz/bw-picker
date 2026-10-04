@@ -72,8 +72,16 @@ sealed class TrayController : IDisposable
         };
         updateTimer.Start();
 
+        // Coming back from a switch between normal and administrator mode: show where the user left off.
+        if (settings.ReopenSettingsAfterSwitch)
+        {
+            settings.ReopenSettingsAfterSwitch = false;
+            try { settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            Notify(Startup.AdminMode ? "BwPicker is now running as administrator." : "BwPicker is now running without administrator rights.", Notice.Info);
+            Dispatcher.UIThread.Post(ShowSettings, DispatcherPriority.Background);
+        }
         // "Run as administrator" is on by default: a release build that isn't elevated yet asks once (UAC).
-        if (settings.RunAsAdmin && !Startup.AdminMode && !AppVersion.IsDevelopment)
+        else if (settings.RunAsAdmin && !Startup.AdminMode && !AppVersion.IsDevelopment)
         {
             Notify("BwPicker needs administrator rights to type into apps that run as administrator. Approve the Windows prompt, " +
                 "or turn it off in Settings.", Notice.Info);
@@ -119,6 +127,7 @@ sealed class TrayController : IDisposable
                 if (!AdminInstall.RequestElevation())
                 {
                     settings.RunAsAdmin = false;
+                    settings.ReopenSettingsAfterSwitch = false;
                     try { settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
                     Notify("Administrator mode stays off, so BwPicker can't type into apps that run as administrator. " +
                         "You can turn it on in Settings.", Notice.Warning);
@@ -127,6 +136,8 @@ sealed class TrayController : IDisposable
                 }
             }
             else AdminInstall.LeaveAdminMode();
+            settings.ReopenSettingsAfterSwitch = true;
+            try { settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             _ = Shutdown();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
