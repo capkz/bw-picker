@@ -1,4 +1,3 @@
-using Avalonia.Controls;
 using Avalonia.Threading;
 using Microsoft.Win32;
 
@@ -15,7 +14,7 @@ sealed class TrayController : IDisposable
     readonly BwClient bw;
     readonly AppSettings settings = AppSettings.Load();
     readonly Updater updater;
-    readonly TrayIcon tray;
+    readonly NativeTray tray;
     readonly GlobalHotkey hotkey;
     readonly DispatcherTimer lockTimer, updateTimer;
     readonly Action shutdownApp;
@@ -33,18 +32,17 @@ sealed class TrayController : IDisposable
         updater = new Updater(settings);
         updater.ReadyToInstall += (_, payload) => Dispatcher.UIThread.Post(() => InstallUpdate(payload));
 
-        var menu = new NativeMenu();
-        menu.Items.Add(Item("Settings…", ShowSettings));
-        menu.Items.Add(Item("Check for updates", async () => { await updater.Check(manual: true); AnnounceUpdate(manual: true); }));
-        menu.Items.Add(new NativeMenuItemSeparator());
-        menu.Items.Add(Item("Sync vault", async () => await Sync()));
-        menu.Items.Add(Item("Lock", async () => await Lock()));
-        menu.Items.Add(new NativeMenuItemSeparator());
-        menu.Items.Add(Item("Exit", async () => await Shutdown()));
-        tray = new TrayIcon { Icon = Ui.AppIcon, ToolTipText = $"BwPicker ({HotkeyLabel})", Menu = menu, IsVisible = true };
-        tray.Clicked += (_, _) => ShowSettings();
-        // Tray icons are owned by the application; register it so the platform keeps it alive and shown.
-        if (Avalonia.Application.Current is { } app) TrayIcon.SetIcons(app, [tray]);
+        tray = new NativeTray($"BwPicker ({HotkeyLabel})",
+        [
+            new("Settings…", ShowSettings, IsDefault: true),
+            new("Check for updates", async () => { await updater.Check(manual: true); AnnounceUpdate(manual: true); }),
+            NativeTray.MenuItem.Separator,
+            new("Sync vault", async () => await Sync()),
+            new("Lock", async () => { if (await Lock()) Notify("Vault locked.", Notice.Info); }),
+            NativeTray.MenuItem.Separator,
+            new("Exit", async () => await Shutdown()),
+        ]);
+        tray.Clicked += ShowSettings;
 
         hotkey = new GlobalHotkey(HotkeyModifiers, HotkeyKey);
         hotkey.Pressed += () => Dispatcher.UIThread.Post(() => _ = OnHotkey());
@@ -96,13 +94,6 @@ sealed class TrayController : IDisposable
             settings.Welcomed = true;
             try { settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
-    }
-
-    static NativeMenuItem Item(string header, Action action)
-    {
-        var item = new NativeMenuItem(header);
-        item.Click += (_, _) => action();
-        return item;
     }
 
     void ShowSettings()
@@ -237,10 +228,10 @@ sealed class TrayController : IDisposable
         finally { syncing = false; }
     }
 
-    async Task Lock()
+    async Task<bool> Lock()
     {
-        try { var task = bw.Lock(); SecureClipboard.ClearOwned(); await task; }
-        catch (InvalidOperationException ex) { Notify(ex.Message, Notice.Warning); }
+        try { var task = bw.Lock(); SecureClipboard.ClearOwned(); await task; return true; }
+        catch (InvalidOperationException ex) { Notify(ex.Message, Notice.Warning); return false; }
     }
 
     async void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
@@ -283,7 +274,7 @@ sealed class TrayController : IDisposable
         hotkey.Dispose();
         try { var task = bw.Lock(); SecureClipboard.ClearOwned(); await task; }
         catch (InvalidOperationException) { }
-        finally { bw.Dispose(); tray.IsVisible = false; tray.Dispose(); shutdownApp(); }
+        finally { bw.Dispose(); tray.Dispose(); shutdownApp(); }
     }
 
     void Notify(string message, Notice kind) => Notify(message, kind, null);
@@ -291,7 +282,7 @@ sealed class TrayController : IDisposable
     void Notify(string message, Notice kind, Action? onClick)
     {
         if (shuttingDown || message.Length == 0) return;
-        Dispatcher.UIThread.Post(() => Toast.Show(message, kind, onClick));
+        Dispatcher.UIThread.Post(() => tray.Notify("BwPicker", message, kind, onClick));
     }
 
     public void Dispose()
