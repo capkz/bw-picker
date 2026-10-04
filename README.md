@@ -130,4 +130,4 @@ Exit the running tray app before rebuilding. To release, push a tag like `v1.2.3
 
 ## License
 
-[MIT](LICENSE)
+[PolyForm Noncommercial 1.0.0](LICENSE): free for personal and other non-commercial use; commercial use requires permission.
