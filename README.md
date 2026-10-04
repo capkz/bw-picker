@@ -2,6 +2,12 @@
 
 # BwPicker
 
+[![Latest release](https://img.shields.io/github/v/release/capkz/bw-picker?label=release)](https://github.com/capkz/bw-picker/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/capkz/bw-picker/total?label=downloads)](https://github.com/capkz/bw-picker/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/capkz/bw-picker/build.yml?branch=main&label=build)](https://github.com/capkz/bw-picker/actions/workflows/build.yml)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
+[![Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4)](#requirements)
+
 **Bitwarden auto-type and autofill for Windows desktop apps.**
 
 A keyboard-driven picker that types your Bitwarden logins into **any Windows app**, not just the browser. Press a hotkey over a desktop app's login screen (a game launcher, Discord, a VPN client…), search, and press Enter.
