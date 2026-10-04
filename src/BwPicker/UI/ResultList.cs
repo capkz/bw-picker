@@ -95,6 +95,8 @@ sealed class ResultList : UserControl
         };
         row.PointerEntered += (_, _) => { if (index != selected) row.Background = Ui.Brush(p.Hover); };
         row.PointerExited += (_, _) => { if (index != selected) row.Background = Brushes.Transparent; };
+        // Handle the press here so the window's drag-to-move doesn't capture the pointer and swallow the click.
+        row.PointerPressed += (_, e) => { if (e.GetCurrentPoint(row).Properties.IsLeftButtonPressed) e.Handled = true; };
         row.PointerReleased += (_, e) =>
         {
             if (e.InitialPressMouseButton != MouseButton.Left) return;
