@@ -40,7 +40,7 @@ static class AtSpi
             using var session = new DBusConnection(sessionAddress);
             await session.ConnectAsync().ConfigureAwait(false);
             // Ask toolkits to expose accessibility (Chromium/Electron and Qt check this); it lasts for this session.
-            await session.CallMethodAsync(Message(session, "org.a11y.Bus", "/org/a11y/bus", "org.freedesktop.DBus.Properties", "Set", "ssv", w =>
+            await session.CallMethodAsync(Message(session, "org.a11y.Bus", "/org/a11y/bus", "org.freedesktop.DBus.Properties", "Set", "ssv", (ref MessageWriter w) =>
             {
                 w.WriteString("org.a11y.Status");
                 w.WriteString("IsEnabled");
@@ -51,9 +51,9 @@ static class AtSpi
 
             var a11y = new DBusConnection(address);
             await a11y.ConnectAsync().ConfigureAwait(false);
-            foreach (string kind in new[] { "window:activate", "window:deactivate", "object:state-changed:focused" })
+            foreach (string kind in new[] { "window:activate", "window:deactivate", "object:state-changed:focused", "object:state-changed:active" })
             {
-                await a11y.CallMethodAsync(Message(a11y, Registry, "/org/a11y/atspi/registry", Registry, "RegisterEvent", "sass", w =>
+                await a11y.CallMethodAsync(Message(a11y, Registry, "/org/a11y/atspi/registry", Registry, "RegisterEvent", "sass", (ref MessageWriter w) =>
                 {
                     w.WriteString(kind);
                     w.WriteArray(Array.Empty<string>());
@@ -61,10 +61,12 @@ static class AtSpi
                 })).ConfigureAwait(false);
             }
             await Watch(a11y, "org.a11y.atspi.Event.Window", "Activate", (sender, path, _detail) => _ = Activated(a11y, sender, path)).ConfigureAwait(false);
-            await Watch(a11y, "org.a11y.atspi.Event.Window", "Deactivate", (sender, path, _) =>
+            await Watch(a11y, "org.a11y.atspi.Event.Window", "Deactivate", (sender, path, _) => Deactivated(sender, path)).ConfigureAwait(false);
+            // GTK 4 reports window activation only as the window's "active" state, not as a window event.
+            await Watch(a11y, "org.a11y.atspi.Event.Object", "StateChanged", (sender, path, gained) =>
             {
-                lock (gate) if (active?.Bus == sender && active.Path == path) active = null;
-            }).ConfigureAwait(false);
+                if (gained) _ = Activated(a11y, sender, path); else Deactivated(sender, path);
+            }, detail: "active").ConfigureAwait(false);
             await Watch(a11y, "org.a11y.atspi.Event.Object", "StateChanged", (sender, path, gained) =>
             {
                 if (gained) lock (gate) focusedBus = sender;
@@ -72,7 +74,10 @@ static class AtSpi
             bus = a11y;
             await FindActive(a11y).ConfigureAwait(false);
         }
-        catch (Exception e) when (e is DBusExceptionBase or InvalidOperationException) { } // no accessibility bus: unverified typing
+        catch (Exception e) when (e is DBusExceptionBase or InvalidOperationException)
+        {
+            System.Diagnostics.Trace.WriteLine($"AT-SPI unavailable: {e.Message}"); // typing is then unverified
+        }
     }
 
     static async Task Watch(DBusConnection a11y, string iface, string member, Action<string, string, bool> handler, string? detail = null)
@@ -90,12 +95,17 @@ static class AtSpi
             false, ObserverFlags.None, null).ConfigureAwait(false);
     }
 
+    static void Deactivated(string sender, string path)
+    {
+        lock (gate) if (active?.Bus == sender && active.Path == path) active = null;
+    }
+
     static async Task Activated(DBusConnection a11y, string sender, string path)
     {
         try
         {
             uint pid = await a11y.CallMethodAsync(Message(a11y, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
-                "GetConnectionUnixProcessID", "s", w => w.WriteString(sender)), (Message m, object? _) => m.GetBodyReader().ReadUInt32(), null).ConfigureAwait(false);
+                "GetConnectionUnixProcessID", "s", (ref MessageWriter w) => w.WriteString(sender)), (Message m, object? _) => m.GetBodyReader().ReadUInt32(), null).ConfigureAwait(false);
             if (pid == Environment.ProcessId) return; // BwPicker's own windows
             string app = await Name(a11y, sender, "/org/a11y/atspi/accessible/root").ConfigureAwait(false) ?? "";
             lock (gate)
@@ -151,7 +161,7 @@ static class AtSpi
     {
         try
         {
-            var value = await a11y.CallMethodAsync(Message(a11y, service, path, "org.freedesktop.DBus.Properties", "Get", "ss", w =>
+            var value = await a11y.CallMethodAsync(Message(a11y, service, path, "org.freedesktop.DBus.Properties", "Get", "ss", (ref MessageWriter w) =>
             {
                 w.WriteString("org.a11y.atspi.Accessible");
                 w.WriteString("Name");
@@ -165,16 +175,20 @@ static class AtSpi
     public static string? Title(Window window)
     {
         if (bus is not { } a11y) return null;
-        try { return Name(a11y, window.Bus, window.Path).WaitAsync(TimeSpan.FromSeconds(1)).GetAwaiter().GetResult(); }
+        try { return Task.Run(() => Name(a11y, window.Bus, window.Path)).WaitAsync(TimeSpan.FromSeconds(1)).GetAwaiter().GetResult(); }
         catch (TimeoutException) { return null; }
     }
 
     static MessageBuffer Message(DBusConnection connection, string service, string path, string iface, string member, string? signature,
-        Action<MessageWriter>? body = null)
+        BodyWriter? body = null)
     {
-        using var writer = connection.GetMessageWriter();
-        writer.WriteMethodCallHeader(service, path, iface, member, signature);
-        body?.Invoke(writer);
-        return writer.CreateMessage();
+        var writer = connection.GetMessageWriter();
+        try
+        {
+            writer.WriteMethodCallHeader(service, path, iface, member, signature);
+            body?.Invoke(ref writer);
+            return writer.CreateMessage();
+        }
+        finally { writer.Dispose(); }
     }
 }

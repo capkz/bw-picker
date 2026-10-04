@@ -94,7 +94,7 @@ sh install-linux.sh
 ```
 
 - **X11** (Xfce, MATE, Cinnamon, KDE or GNOME on Xorg): everything works as on Windows. Copying needs `xclip`; typing needs `libxtst6` (both are installed on most desktops).
-- **Wayland**: apps can't listen for a global hotkey or type into other apps there. Add a keyboard shortcut in your desktop's settings (e.g. `Ctrl+Alt+B`) that runs `~/.local/share/BwPicker/BwPicker --pick`; the picker then opens and copies with `Ctrl+U` / `Ctrl+P` (needs `wl-clipboard`).
+- **Wayland** (GNOME 46+, KDE Plasma 6, Hyprland): BwPicker asks the desktop for the `Ctrl+Alt+B` shortcut and for permission to type, each once (the desktop shows a dialog; the choice is remembered). It finds the app you're in through the accessibility bus, so logins are ranked and typing is checked like on Windows. Two differences: only characters on your keyboard layout can be typed there (a login with others is copied instead, never typed partially), and if an app doesn't report itself the picker says "unverified" before typing. Copying needs `wl-clipboard`. On desktops without these portals, bind a shortcut to `~/.local/share/BwPicker/BwPicker --pick` yourself and copy with `Ctrl+U` / `Ctrl+P`.
 - The tray icon uses the StatusNotifierItem standard: built into KDE, Xfce and Cinnamon; GNOME needs the AppIndicator extension (included in Ubuntu).
 
 To build from source on Linux: `dotnet build BwPicker.sln -c Release -p:TargetOS=linux`.

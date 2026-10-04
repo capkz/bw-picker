@@ -447,6 +447,10 @@ static class Tests
         var passwordOnly = new FakeKeyboard();
         new InputTyper(passwordOnly).Type(new IntPtr(1), credential, true, () => true, () => true, TypeFields.PasswordOnly);
         Assert(passwordOnly.Sends == credential.Password!.Characters.Length + 1, "Password-only typing sent extra keys");
+        // Wayland can only type what's on the keyboard layout: refuse up front rather than type part of a password.
+        var limited = new FakeKeyboard { Typable = false };
+        await Throws(() => { new InputTyper(limited).Type(new IntPtr(1), credential, false, () => true, () => true); return Task.CompletedTask; });
+        Assert(limited.Sends == 0, "Typing started although the layout can't type the credential");
         var held = new FakeKeyboard { Held = true };
         await Throws(() => { new InputTyper(held).Type(new IntPtr(1), credential, false, () => true, () => true); return Task.CompletedTask; });
         Assert(held.Sends == 0, "Typing ignored held modifiers");
@@ -491,5 +495,7 @@ static class Tests
         }
         public void Wait(int milliseconds) { }
         public bool Press(KeyStroke key) { Sends++; AfterSend?.Invoke(); return !Blocked; }
+        public bool Typable = true;
+        public bool CanType(ReadOnlySpan<char> text) => Typable;
     }
 }

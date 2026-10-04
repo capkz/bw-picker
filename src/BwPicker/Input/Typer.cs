@@ -17,6 +17,8 @@ interface IKeyboard
     bool FocusInside(IntPtr window);
     /// <summary>Presses and releases one key; false if the system refused the input.</summary>
     bool Press(KeyStroke key);
+    /// <summary>Whether every character can be typed (Wayland can only type what's on the keyboard layout).</summary>
+    bool CanType(ReadOnlySpan<char> text) => true;
     void Wait(int milliseconds);
 }
 
@@ -33,6 +35,8 @@ sealed class InputTyper(IKeyboard keyboard)
             throw new InvalidOperationException("The destination window could not be verified.");
         Validate(credential.Username.AsSpan());
         if (credential.Password is { } available) Validate(available.Characters);
+        if (!keyboard.CanType(credential.Username.AsSpan()) || (credential.Password is { } typed && !keyboard.CanType(typed.Characters)))
+            throw new InvalidOperationException("This login has characters your keyboard layout can't type here. Use Ctrl+U / Ctrl+P to copy instead.");
         keyboard.Focus(window);
         int tries = 0;
         while (keyboard.Foreground != window && tries++ < 40) keyboard.Wait(25);

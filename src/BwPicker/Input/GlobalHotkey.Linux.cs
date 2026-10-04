@@ -69,22 +69,22 @@ sealed class GlobalHotkey : IDisposable
                 ObserverFlags.None, false, null).ConfigureAwait(false);
 
             string token = Portal.Token("gs"), sessionToken = Portal.Token("gss");
-            var (code, results) = await Portal.Request(bus, token, Portal.Call(bus, Shortcuts, "CreateSession", "a{sv}", w => w.WriteDictionary(
+            var (code, results) = await Portal.Request(bus, token, Portal.Call(bus, Shortcuts, "CreateSession", "a{sv}", (ref MessageWriter w) => Portal.WriteOptions(ref w, 
                 [Portal.Option("handle_token", token), Portal.Option("session_handle_token", sessionToken)])), TimeSpan.FromSeconds(10)).ConfigureAwait(false);
             if (code != 0 || !results.TryGetValue("session_handle", out var handle)) throw new InvalidOperationException("no session");
             string session = handle.Type == VariantValueType.ObjectPath ? handle.GetObjectPathAsString() : handle.GetString();
 
             token = Portal.Token("gs");
-            (code, _) = await Portal.Request(bus, token, Portal.Call(bus, Shortcuts, "BindShortcuts", "oa(sa{sv})sa{sv}", w =>
+            (code, _) = await Portal.Request(bus, token, Portal.Call(bus, Shortcuts, "BindShortcuts", "oa(sa{sv})sa{sv}", (ref MessageWriter w) =>
             {
                 w.WriteObjectPath(session);
                 var list = w.WriteArrayStart(DBusType.Struct);
                 w.WriteStructureStart();
                 w.WriteString("pick");
-                w.WriteDictionary([Portal.Option("description", "Open BwPicker over the app you're using"), Portal.Option("preferred_trigger", "CTRL+ALT+b")]);
+                Portal.WriteOptions(ref w, [Portal.Option("description", "Open BwPicker over the app you're using"), Portal.Option("preferred_trigger", "CTRL+ALT+b")]);
                 w.WriteArrayEnd(list);
                 w.WriteString("");
-                w.WriteDictionary([Portal.Option("handle_token", token)]);
+                Portal.WriteOptions(ref w, [Portal.Option("handle_token", token)]);
             }), TimeSpan.FromMinutes(5)).ConfigureAwait(false);
             if (code != 0) Unavailable?.Invoke("The shortcut wasn't set up. " + ManualShortcutHint);
         }

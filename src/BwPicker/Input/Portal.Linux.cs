@@ -7,6 +7,9 @@ namespace BwPicker;
 /// (a global shortcut, sending key events). Requests answer asynchronously through a Request object's Response
 /// signal. All calls use ConfigureAwait(false): typing waits on them synchronously from the UI thread.
 /// </summary>
+/// <summary>Writes a message body. MessageWriter is a struct, so it must be passed by reference.</summary>
+delegate void BodyWriter(ref MessageWriter writer);
+
 static class Portal
 {
     public const string Service = "org.freedesktop.portal.Desktop", ObjectPath = "/org/freedesktop/portal/desktop";
@@ -32,13 +35,13 @@ static class Portal
             // remembered for BwPicker. Older portals lack this; they then identify the app by its systemd scope.
             try
             {
-                await bus.CallMethodAsync(Call(bus, "org.freedesktop.host.portal.Registry", "Register", "sa{sv}", w =>
+                await bus.CallMethodAsync(Call(bus, "org.freedesktop.host.portal.Registry", "Register", "sa{sv}", (ref MessageWriter w) =>
                 {
                     w.WriteString(AppId);
-                    w.WriteDictionary(Array.Empty<KeyValuePair<string, VariantValue>>());
+                    Portal.WriteOptions(ref w, [Portal.Option("bwpicker", true)]);
                 })).ConfigureAwait(false);
             }
-            catch (DBusExceptionBase) { }
+            catch (DBusExceptionBase e) { System.Diagnostics.Trace.WriteLine($"Portal registry: {e.Message}"); }
             return connection = bus;
         }
         finally { gate.Release(); }
@@ -49,22 +52,30 @@ static class Portal
     {
         try
         {
-            var reply = await bus.CallMethodAsync(Call(bus, "org.freedesktop.DBus.Properties", "Get", "ss", w =>
+            var reply = await bus.CallMethodAsync(Call(bus, "org.freedesktop.DBus.Properties", "Get", "ss", (ref MessageWriter w) =>
             {
                 w.WriteString(iface);
                 w.WriteString("version");
             }), (Message m, object? _) => m.GetBodyReader().ReadVariantValue(), null).ConfigureAwait(false);
             return reply.GetUInt32();
         }
-        catch (DBusExceptionBase) { return 0; }
+        catch (DBusExceptionBase e)
+        {
+            System.Diagnostics.Trace.WriteLine($"Portal {iface} version: {e.Message}");
+            return 0;
+        }
     }
 
-    public static MessageBuffer Call(DBusConnection bus, string iface, string member, string? signature, Action<MessageWriter>? body = null)
+    public static MessageBuffer Call(DBusConnection bus, string iface, string member, string? signature, BodyWriter? body = null)
     {
-        using var writer = bus.GetMessageWriter();
-        writer.WriteMethodCallHeader(Service, ObjectPath, iface, member, signature);
-        body?.Invoke(writer);
-        return writer.CreateMessage();
+        var writer = bus.GetMessageWriter();
+        try
+        {
+            writer.WriteMethodCallHeader(Service, ObjectPath, iface, member, signature);
+            body?.Invoke(ref writer);
+            return writer.CreateMessage();
+        }
+        finally { writer.Dispose(); }
     }
 
     /// <summary>A unique handle_token for a request or session.</summary>
@@ -94,4 +105,17 @@ static class Portal
     }
 
     public static KeyValuePair<string, VariantValue> Option(string key, VariantValue value) => new(key, value);
+
+    /// <summary>Writes an a{sv} options dictionary entry by entry.</summary>
+    public static void WriteOptions(ref MessageWriter writer, IEnumerable<KeyValuePair<string, VariantValue>> options)
+    {
+        var start = writer.WriteDictionaryStart();
+        foreach (var (key, value) in options)
+        {
+            writer.WriteDictionaryEntryStart();
+            writer.WriteString(key);
+            writer.WriteVariant(value);
+        }
+        writer.WriteDictionaryEnd(start);
+    }
 }
