@@ -44,8 +44,11 @@ if ($Uninstall) {
 if (-not (Test-Path $Source)) { throw "BwPicker.exe not found at $Source" }
 $version = (Get-Item $Source).VersionInfo.ProductVersion
 New-Item -ItemType Directory -Force -Path $target | Out-Null
+# BwPicker.exe plus the native libraries next to it (SkiaSharp, HarfBuzz, ANGLE).
+$sourceDir = Split-Path (Resolve-Path $Source).Path
 Copy-Item $Source $exe -Force
-Unblock-File $exe
+Get-ChildItem $sourceDir -Filter *.dll | Copy-Item -Destination $target -Force
+Get-ChildItem $target -Include *.exe, *.dll -Recurse | Unblock-File
 
 # BwPicker needs the official Bitwarden CLI for signing in and syncing.
 $bw = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\bw.exe'

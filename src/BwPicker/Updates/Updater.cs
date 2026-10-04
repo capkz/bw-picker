@@ -36,7 +36,7 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
     public string Status { get; private set; } = AppVersion.IsDevelopment ? "Development build" : "";
     public bool Busy => busy;
     public event EventHandler? Changed;
-    /// <summary>Raised with the path of the verified new exe; the app installs it and restarts.</summary>
+    /// <summary>Raised with the folder holding the verified new app files; the app installs them and restarts.</summary>
     public event EventHandler<string>? ReadyToInstall;
 
     public bool CheckIsDue =>
@@ -164,18 +164,32 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
         if (!CryptographicOperations.FixedTimeEquals(actual, expected))
             throw new InvalidOperationException("The download doesn't match the release checksum, so it wasn't installed.");
 
-        string exe = Path.Combine(folder, "BwPicker.exe");
+        // The app is BwPicker.exe plus the native libraries next to it; take only those, from the zip's root.
+        string payload = Path.Combine(folder, "app");
+        Directory.CreateDirectory(payload);
+        long extracted = 0;
         using (var archive = ZipFile.OpenRead(zip))
         {
-            var entry = archive.GetEntry("BwPicker.exe") ?? throw new InvalidOperationException("The release package has no BwPicker.exe.");
-            if (entry.Length > MaxPackageBytes) throw new InvalidOperationException("The release package is unexpectedly large.");
-            entry.ExtractToFile(exe, overwrite: true);
+            foreach (var entry in archive.Entries)
+            {
+                if (!IsAppFile(entry.FullName)) continue;
+                extracted += entry.Length;
+                if (entry.Length > MaxPackageBytes || extracted > MaxPackageBytes) throw new InvalidOperationException("The release package is unexpectedly large.");
+                entry.ExtractToFile(Path.Combine(payload, entry.Name), overwrite: true);
+            }
         }
+        string exe = Path.Combine(payload, "BwPicker.exe");
+        if (!File.Exists(exe)) throw new InvalidOperationException("The release package has no BwPicker.exe.");
         var info = FileVersionInfo.GetVersionInfo(exe);
         if (info.ProductVersion?.Split('+')[0] != release.Version.ToString(3))
             throw new InvalidOperationException("The downloaded app reports a different version than the release.");
-        return exe;
+        return payload;
     }
+
+    /// <summary>An exe or DLL at the zip's root (no folders, so nothing can be written outside the app folder).</summary>
+    internal static bool IsAppFile(string entryName) =>
+        entryName.Length > 0 && entryName.IndexOfAny(['/', '\\', ':']) < 0 && !entryName.StartsWith('.') &&
+        (entryName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
 
     void SetState(bool working, string status)
     {
@@ -199,31 +213,38 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
     }
 
     /// <summary>
-    /// Swaps the running exe for the new one and starts it. Windows allows renaming a running exe, so the
-    /// current file becomes BwPicker.exe.old (removed by the new instance) and is restored if anything fails.
+    /// Swaps the app's files (exe and native libraries) for the new set and starts the new exe. Windows allows renaming
+    /// files that are in use, so each current file becomes "*.old" (removed by the new instance); if anything fails,
+    /// every file is put back.
     /// </summary>
-    public static void InstallAndRelaunch(string newExe)
+    public static void InstallAndRelaunch(string payloadFolder)
     {
         string current = Environment.ProcessPath ?? throw new InvalidOperationException("Can't locate the running app.");
-        string old = current + ".old";
+        string folder = Path.GetDirectoryName(current)!;
+        var files = Directory.GetFiles(payloadFolder).Select(Path.GetFileName).OfType<string>().Where(IsAppFile).ToList();
+        if (!files.Contains("BwPicker.exe", StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("The update has no BwPicker.exe.");
+
+        var moved = new List<string>();
+        var copied = new List<string>();
         try
         {
-            if (File.Exists(old)) File.Delete(old);
-            File.Move(current, old);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            throw new InvalidOperationException($"BwPicker can't replace itself in {Path.GetDirectoryName(current)}. " +
-                "Move it to a folder you can write to, such as %LOCALAPPDATA%\\Programs\\BwPicker, or update manually.");
-        }
-        try
-        {
-            File.Copy(newExe, current);
+            foreach (string name in files)
+            {
+                string target = Path.Combine(folder, name), old = target + ".old";
+                if (File.Exists(old)) File.Delete(old);
+                if (File.Exists(target)) { File.Move(target, old); moved.Add(target); }
+                File.Copy(Path.Combine(payloadFolder, name), target);
+                copied.Add(target);
+            }
             Process.Start(new ProcessStartInfo(current) { UseShellExecute = false, ArgumentList = { "--updated-from", Environment.ProcessId.ToString() } });
         }
-        catch
+        catch (Exception e)
         {
-            try { if (File.Exists(current)) File.Delete(current); File.Move(old, current); } catch (IOException) { }
+            foreach (string target in copied) { try { File.Delete(target); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+            foreach (string target in moved) { try { File.Move(target + ".old", target, overwrite: true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+            if (e is UnauthorizedAccessException)
+                throw new InvalidOperationException($"BwPicker can't replace itself in {folder}. " +
+                    "Move it to a folder you can write to, such as %LOCALAPPDATA%\\Programs\\BwPicker, or update manually.");
             throw;
         }
     }
@@ -240,11 +261,16 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
             try { using var previous = Process.GetProcessById(pid); previous.WaitForExit(15_000); }
             catch (ArgumentException) { } // already gone
         }
-        string old = Environment.ProcessPath + ".old";
-        for (int i = 0; i < 20 && File.Exists(old); i++)
+        if (Path.GetDirectoryName(Environment.ProcessPath) is { } appFolder)
         {
-            try { File.Delete(old); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Thread.Sleep(250); }
+            foreach (string old in Directory.EnumerateFiles(appFolder, "*.old"))
+            {
+                for (int i = 0; i < 20 && File.Exists(old); i++)
+                {
+                    try { File.Delete(old); }
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Thread.Sleep(250); }
+                }
+            }
         }
         foreach (string folder in Directory.EnumerateDirectories(Path.GetTempPath(), "BwPicker-update-*"))
         {

@@ -29,4 +29,16 @@
     <InternalsVisibleTo Include="BwPicker.Tests" />
   </ItemGroup>
 
+  <!--
+    Release builds (with a runtime identifier) embed the native libraries Avalonia needs, so the exe can restore or
+    verify the copies next to it at startup (see NativeLibraries.cs). This keeps updates from older versions, whose
+    updater only replaced BwPicker.exe, working.
+  -->
+  <Target Name="EmbedNativeLibraries" BeforeTargets="AssignTargetPaths;PrepareResourceNames" DependsOnTargets="ResolvePackageAssets"
+          Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <EmbeddedResource Include="@(NativeCopyLocalItems->WithMetadataValue('Extension', '.dll'))" LogicalName="native/%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+
 </Project>

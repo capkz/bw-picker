@@ -150,11 +150,14 @@ sealed partial class BwClient : IDisposable
         {
             key = await Task.Run(() =>
             {
+                var timer = Stopwatch.StartNew();
                 var account = LocalVault.ReadAccount(path);
                 using var lease = masterPassword.Reveal();
                 var unlocked = LocalVault.UnlockUserKey(account, lease.Characters);
+                Trace.WriteLine($"In-process unlock: user key ok after {timer.ElapsedMilliseconds} ms");
                 try { LocalVault.ReadVault(path, unlocked).Dispose(); } // every item must decrypt here, or use the CLI
-                catch { CryptographicOperations.ZeroMemory(unlocked); throw; }
+                catch (Exception e) { Trace.WriteLine($"In-process unlock: vault decrypt failed: {e.GetType().Name}: {e.Message}"); CryptographicOperations.ZeroMemory(unlocked); throw; }
+                Trace.WriteLine($"In-process unlock: done in {timer.ElapsedMilliseconds} ms");
                 return unlocked;
             });
             lock (state)
@@ -166,7 +169,7 @@ sealed partial class BwClient : IDisposable
             return true;
         }
         catch (LocalVaultUnsupportedException e) { Trace.WriteLine($"In-process unlock unavailable: {e.Message}"); return false; }
-        catch (CryptographicException) { return false; }
+        catch (CryptographicException e) { Trace.WriteLine($"In-process unlock declined: {e.GetType().Name}: {e.Message}"); return false; }
         finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
     }
 

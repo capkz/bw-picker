@@ -121,7 +121,7 @@ src/BwPicker/
   App/       entry point, tray app, settings storage, autostart
   Vault/     Bitwarden CLI client, sign-in and server choice, protected memory, vault parsing
   Input/     window matching, guarded typing, clipboard
-  UI/        theme, controls, picker, unlock, sign-in and settings windows
+  UI/        Avalonia windows: picker, unlock, sign-in, settings, CLI setup, notifications
   Updates/   GitHub release check and self-update
 tests/BwPicker.Tests/   regression checks with a fake CLI
 ```

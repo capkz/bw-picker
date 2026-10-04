@@ -31,7 +31,7 @@ sealed class TrayController : IDisposable
         this.shutdownApp = shutdownApp;
         bw = client ?? new();
         updater = new Updater(settings);
-        updater.ReadyToInstall += (_, exe) => Dispatcher.UIThread.Post(() => InstallUpdate(exe));
+        updater.ReadyToInstall += (_, payload) => Dispatcher.UIThread.Post(() => InstallUpdate(payload));
 
         var menu = new NativeMenu();
         menu.Items.Add(Item("Settings…", ShowSettings));
@@ -106,11 +106,11 @@ sealed class TrayController : IDisposable
         else if (manual) Notify(updater.Status, Notice.Info);
     }
 
-    async void InstallUpdate(string exe)
+    async void InstallUpdate(string payload)
     {
         try
         {
-            Updater.InstallAndRelaunch(exe);
+            Updater.InstallAndRelaunch(payload);
             await Shutdown();
         }
         catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)

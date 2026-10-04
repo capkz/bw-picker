@@ -243,6 +243,12 @@ static class Tests
         rejected = false;
         try { Updater.ParseChecksum($"{hash}  other.zip", "BwPicker-win-x64.zip"); } catch (InvalidOperationException) { rejected = true; }
         Assert(rejected, "Missing checksum accepted");
+
+        // Update packages may only place exe/DLL files directly in the app folder.
+        foreach (string ok in new[] { "BwPicker.exe", "libSkiaSharp.dll", "av_libglesv2.dll" })
+            Assert(Updater.IsAppFile(ok), $"{ok} not accepted from an update package");
+        foreach (string bad in new[] { "../evil.dll", "sub/evil.dll", "sub\\evil.dll", "C:evil.exe", "README.md", "Install-Admin.ps1", ".hidden.dll", "" })
+            Assert(!Updater.IsAppFile(bad), $"'{bad}' accepted from an update package");
         // Admin autostart is only allowed from folders that need admin rights to change.
         string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         Assert(Startup.InProtectedFolder(Path.Combine(pf, "BwPicker", "BwPicker.exe")), "Program Files not treated as protected");

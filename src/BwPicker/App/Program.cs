@@ -16,6 +16,9 @@ static partial class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Before any UI code loads SkiaSharp/HarfBuzz/ANGLE.
+        if (!NativeLibraries.Ensure()) return;
+
         if (args.Contains("--preview"))
         {
             if (args.Contains("--dark")) Palette.ForceDark = true;
