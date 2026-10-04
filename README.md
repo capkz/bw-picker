@@ -80,7 +80,8 @@ Builds from source report version `0.0.0-dev` and never update themselves.
 
 Read [SECURITY.md](SECURITY.md) before relying on this with important accounts. In short:
 
-- BwPicker does **no cryptography or vault storage of its own**. Unlocking, syncing and decryption are done by the official CLI, which it launches with a cleaned-up environment after verifying its signature.
+- BwPicker **stores no vault data of its own**. Signing in and syncing are done by the official CLI, which it launches with a cleaned-up environment after verifying its signature.
+- **Unlocking is instant**, like the browser extension: BwPicker decrypts the CLI's end-to-end encrypted local vault in-process, using only .NET's built-in PBKDF2, HKDF, AES-256 and HMAC-SHA256, and verifies every item's MAC before decrypting it. Anything else (Argon2 accounts, organization items, a password that doesn't verify) goes through `bw unlock` instead.
 - The master password and API key reach the CLI through environment variables, never on the command line. The session key and cached passwords are encrypted in memory and wiped when the vault locks.
 - Typing checks, before every keystroke, that the same app is still in front with focus inside it, and that no modifier keys are held. It stops if anything changes.
 - Updates come only from this repository's GitHub releases and must match the release's SHA-256 checksum.

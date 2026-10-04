@@ -58,6 +58,26 @@ sealed class MemorySecret : IDisposable
         }
     }
 
+    public delegate T BytesFunc<T>(ReadOnlySpan<byte> bytes);
+
+    /// <summary>Runs <paramref name="use"/> on the raw bytes (e.g. a binary key) in a buffer wiped afterwards.</summary>
+    public T UseBytes<T>(BytesFunc<T> use)
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var copy = GC.AllocateUninitializedArray<byte>(buffer.Length, pinned: true);
+            buffer.CopyTo(copy, 0);
+            try
+            {
+                if (!CryptUnprotectMemory(copy, (uint)copy.Length, 0))
+                    throw new InvalidOperationException("Could not read the credential cache.", new Win32Exception());
+                return use(copy.AsSpan(0, length));
+            }
+            finally { CryptographicOperations.ZeroMemory(copy); }
+        }
+    }
+
     public void Dispose()
     {
         lock (gate) { disposed = true; CryptographicOperations.ZeroMemory(buffer); }

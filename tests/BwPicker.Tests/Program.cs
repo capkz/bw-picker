@@ -35,12 +35,131 @@ static class Tests
             ClientChecks().GetAwaiter().GetResult();
             SecurityChecks().GetAwaiter().GetResult();
             AccountChecks().GetAwaiter().GetResult();
+            LocalVaultChecks().GetAwaiter().GetResult();
             UpdateChecks();
             LayoutChecks();
             Console.WriteLine("PASS: all regression checks.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    static async Task LocalVaultChecks()
+    {
+        // Known-answer vectors generated independently with Python's hashlib/cryptography following
+        // Bitwarden's scheme: PBKDF2-SHA256 → HKDF-Expand("enc"/"mac") → AES-256-CBC + HMAC-SHA256.
+        const string katPassword = "correct horse battery", katSalt = "kat@example.com";
+        const string katWrappedUserKey = "2.BwcHBwcHBwcHBwcHBwcHBw==|MbxzEdByl06u1VU7pok6vXWQQ8XqSRii8hLi74l1knyA/MFdKQzJeRRkNyr57cA8wsCRzCAds3BU7QPxNOiZgPGFblZtQad09EPNyII4/T0=|7a6tfEvdtnnIqXrb2ibJlDgmq2IHL8T1nEAsFLJqrO4=";
+        const string katName = "2.CQkJCQkJCQkJCQkJCQkJCQ==|H6dmZV8l+DOIhabvPE3uEnm7QjOfPWzrxvIiNQv5nqM=|S57+76BNd7tOo6IWFW01nI5A8+8hENsLD9E2ZmWOM80=";
+        const string katStretched = "e291dbaf39c2ca7ead2a9399000d7062f5b2807da9f10b8fb2d0474948bbb3eaaefbd730185271af39bc42254106c0feaecb6911b0c428c85f56c7e98f56c3b8";
+        var stretched = BitwardenCrypto.DeriveStretchedMasterKey(katPassword, katSalt, 5000);
+        Assert(Convert.ToHexStringLower(stretched) == katStretched, "PBKDF2/HKDF stretched key differs from the independent vector");
+        var katUserKey = LocalVault.UnlockUserKey(new LocalVault.Account(katSalt, 5000, katWrappedUserKey), katPassword);
+        Assert(katUserKey.AsSpan().SequenceEqual(Enumerable.Range(0, 64).Select(i => (byte)i).ToArray()), "User key unwrap differs from the vector");
+        Assert(BitwardenCrypto.DecryptString(katName, katUserKey) == "Kät 🔑 vector", "Item decryption differs from the vector");
+
+        bool rejected(Action action)
+        {
+            try { action(); return false; } catch (System.Security.Cryptography.CryptographicException) { return true; }
+        }
+        Assert(rejected(() => LocalVault.UnlockUserKey(new LocalVault.Account(katSalt, 5000, katWrappedUserKey), "wrong password")),
+            "Wrong master password was not rejected");
+        string tamperedMac = katName[..^6] + (katName[^6] == 'A' ? 'B' : 'A') + katName[^5..];
+        string tamperedCiphertext = katName.Replace("H6dmZV8l", "H6dmZV8m");
+        Assert(rejected(() => BitwardenCrypto.Decrypt(tamperedMac, katUserKey)), "Tampered MAC was accepted");
+        Assert(rejected(() => BitwardenCrypto.Decrypt(tamperedCiphertext, katUserKey)), "Tampered ciphertext was accepted");
+        Assert(rejected(() => BitwardenCrypto.Decrypt("0." + katName[2..], katUserKey)), "Unauthenticated EncString type accepted");
+        Assert(rejected(() => BitwardenCrypto.Decrypt("2.garbage", katUserKey)), "Malformed EncString accepted");
+
+        // A synthetic CLI data.json: a normal login, one with a per-item key, one in trash, one secure note.
+        string userId = Guid.NewGuid().ToString();
+        var itemKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(64);
+        string E(string text, byte[] key) => BitwardenCrypto.Encrypt(Encoding.UTF8.GetBytes(text), key);
+        object Login(string id, string name, string user, string pass, string uri, byte[] key, string? wrappedKey = null, string? deleted = null) => new
+        {
+            id, type = 1, name = E(name, key), key = wrappedKey, deletedDate = deleted, organizationId = (string?)null,
+            login = new { username = E(user, key), password = E(pass, key), uris = new[] { new { uri = E(uri, key), match = (int?)null } } },
+        };
+        var ciphers = new Dictionary<string, object>
+        {
+            ["a"] = Login("a", "Discord", "you@example.com", "pässwörd-1", "https://discord.com", katUserKey),
+            ["b"] = Login("b", "Steam", "gamer", "pässwörd-2", "https://store.steampowered.com", itemKey,
+                wrappedKey: BitwardenCrypto.Encrypt(itemKey, katUserKey)),
+            ["c"] = Login("c", "Old", "x", "y", "https://old.example", katUserKey, deleted: "2026-01-01T00:00:00Z"),
+            ["d"] = new { id = "d", type = 2, name = E("A note", katUserKey) },
+        };
+        object State(object cipherMap, int kdfType = 0) => new Dictionary<string, object?>
+        {
+            ["global_account_activeAccountId"] = userId,
+            ["global_account_accounts"] = new Dictionary<string, object> { [userId] = new { email = katSalt } },
+            [$"user_{userId}_masterPasswordUnlock_masterPasswordUnlockKey"] = new
+            {
+                salt = katSalt, kdf = new { kdfType, iterations = 5000 }, masterKeyWrappedUserKey = katWrappedUserKey,
+            },
+            [$"user_{userId}_ciphers_ciphers"] = cipherMap,
+            [$"user_{userId}_token_refreshToken"] = "secret-refresh-token",
+        };
+        string vaultPath = Path.Combine(Path.GetTempPath(), $"bwpicker-vault-{Guid.NewGuid():N}.json");
+        void WriteState(object content) => File.WriteAllText(vaultPath, System.Text.Json.JsonSerializer.Serialize(content));
+        try
+        {
+            WriteState(State(ciphers));
+            using (var vault = LocalVault.ReadVault(vaultPath, katUserKey))
+            {
+                Assert(vault.Entries.Select(e => e.Name).OrderBy(n => n).SequenceEqual(["Discord", "Steam"]),
+                    "Local vault should list exactly the logins not in trash");
+                using var steamPassword = vault.Credentials["b"].Password!.Reveal();
+                Assert(steamPassword.Characters.SequenceEqual("pässwörd-2"), "Per-item key decryption failed");
+                Assert(vault.Entries.Single(e => e.Id == "a").Uris.Single() == "https://discord.com", "URI decryption failed");
+            }
+
+            // The client unlocks in-process: no `bw unlock` and no `bw list` processes.
+            var calls = new List<string>();
+            using (var client = new BwClient((_, args) => { calls.Add(args[0]); return Task.FromResult((1, "", "")); }, vaultPath))
+            {
+                using var password = new MemorySecret(katPassword.AsSpan());
+                var timer = Stopwatch.StartNew();
+                await client.Unlock(password);
+                await client.Load(sync: false);
+                Assert(client.Unlocked && client.Entries.Count == 2, "In-process unlock did not load the vault");
+                Assert(!calls.Contains("unlock") && !calls.Contains("list"), "In-process unlock still started the CLI");
+                using (var credential = await client.GetCredentials("a"))
+                    Assert(credential.Password!.Characters.SequenceEqual("pässwörd-1"), "In-process credentials are wrong");
+                Console.WriteLine($"     In-process unlock + load: {timer.ElapsedMilliseconds} ms (5,000 KDF iterations in this test).");
+                await client.Lock();
+                Assert(!client.Unlocked && client.Entries.Count == 0, "Lock did not clear the in-process vault");
+                await Throws(() => client.GetCredentials("a"));
+            }
+
+            // Wrong password or unsupported vaults defer to the CLI, which stays the authority.
+            calls.Clear();
+            using (var client = new BwClient((_, args) => { calls.Add(args[0]); return Task.FromResult((args[0] == "status" ? 0 : 1, """{"status":"locked"}""", "")); }, vaultPath))
+            {
+                using var wrong = new MemorySecret("not it".AsSpan());
+                await Throws(() => client.Unlock(wrong));
+                Assert(calls.Contains("unlock") && !client.Unlocked, "Wrong password did not defer to the CLI");
+            }
+            foreach (var unsupported in new[]
+            {
+                State(ciphers, kdfType: 1),
+                State(new Dictionary<string, object> { ["o"] = new { id = "o", type = 1, organizationId = "org", name = E("Org", katUserKey) } }),
+            })
+            {
+                WriteState(unsupported);
+                calls.Clear();
+                using var client = new BwClient((_, args) => { calls.Add(args[0]); return Task.FromResult((args[0] == "status" ? 0 : 1, """{"status":"locked"}""", "")); }, vaultPath);
+                using var password = new MemorySecret(katPassword.AsSpan());
+                await Throws(() => client.Unlock(password));
+                Assert(calls.Contains("unlock"), "Argon2/organization vault did not fall back to the CLI");
+            }
+        }
+        finally
+        {
+            File.Delete(vaultPath);
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(stretched);
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(katUserKey);
+        }
+        Console.WriteLine("PASS: in-process unlock matches independent vectors; MAC/tamper/type checks; per-item keys, trash, CLI fallback, lock wipe.");
     }
 
     static async Task AccountChecks()

@@ -30,6 +30,8 @@ sealed partial class BwClient : IDisposable
     readonly SemaphoreSlim commands = new(1, 1);
     readonly Func<IDictionary<string, string>?, string[], Task<(int Code, string Stdout, string Stderr)>>? commandRunner;
     MemorySecret? session;
+    MemorySecret? userKey; // set when the vault was unlocked in-process instead of through the CLI
+    readonly string? localVaultPath;
     Dictionary<string, (string? Username, MemorySecret? Password)> credentials = [];
     IReadOnlyList<Entry> entries = [];
     CancellationTokenSource operations = new();
@@ -39,12 +41,19 @@ sealed partial class BwClient : IDisposable
     int generation, unlocking;
     bool blocked, disposed, preview;
 
-    public BwClient(Func<IDictionary<string, string>?, string[], Task<(int Code, string Stdout, string Stderr)>>? commandRunner = null)
-        => this.commandRunner = commandRunner;
+    /// <param name="localVaultPath">The CLI's data.json for in-process unlock; defaults to the real one only when using the real CLI.</param>
+    public BwClient(Func<IDictionary<string, string>?, string[], Task<(int Code, string Stdout, string Stderr)>>? commandRunner = null,
+        string? localVaultPath = null)
+    {
+        this.commandRunner = commandRunner;
+        this.localVaultPath = localVaultPath ?? (commandRunner == null ? LocalVault.DefaultPath : null);
+    }
+
+    bool HasAccess => session != null || userKey != null;
     public BwStatus? CachedStatus { get; private set; }
     public event EventHandler? EntriesChanged;
     public event EventHandler? Revoked;
-    public bool Unlocked { get { lock (state) return !disposed && !blocked && session != null; } }
+    public bool Unlocked { get { lock (state) return !disposed && !blocked && HasAccess; } }
     public IReadOnlyList<Entry> Entries { get { lock (state) return entries; } }
     public static BwClient Preview(IEnumerable<Entry> entries) => new() { entries = entries.ToList(), preview = true };
 
@@ -95,6 +104,7 @@ sealed partial class BwClient : IDisposable
         try
         {
             await pendingCleanup;
+            if (await TryUnlockLocally(masterPassword, started)) return;
             await Status();
             using var output = await Run([("BWPICKER_PW", masterPassword)], started, "unlock", "--passwordenv", "BWPICKER_PW", "--raw");
             if (output.Code != 0) throw new InvalidOperationException("Unlock failed. Check your master password and Bitwarden account.");
@@ -126,18 +136,72 @@ sealed partial class BwClient : IDisposable
         finally { CryptographicOperations.ZeroMemory(decoded); }
     }
 
+    /// <summary>
+    /// Unlocks like the browser extension: derives the key from the master password and decrypts the CLI's
+    /// local, end-to-end encrypted vault in-process, with no CLI process to start. Returns false (and the caller
+    /// uses `bw unlock`) for anything this path doesn't handle, including a password that fails to
+    /// authenticate, so the CLI stays the authority on wrong passwords.
+    /// </summary>
+    async Task<bool> TryUnlockLocally(MemorySecret masterPassword, int started)
+    {
+        if (localVaultPath is not { } path) return false;
+        byte[]? key = null;
+        try
+        {
+            key = await Task.Run(() =>
+            {
+                var account = LocalVault.ReadAccount(path);
+                using var lease = masterPassword.Reveal();
+                var unlocked = LocalVault.UnlockUserKey(account, lease.Characters);
+                try { LocalVault.ReadVault(path, unlocked).Dispose(); } // every item must decrypt here, or use the CLI
+                catch { CryptographicOperations.ZeroMemory(unlocked); throw; }
+                return unlocked;
+            });
+            lock (state)
+            {
+                EnsureGeneration(started);
+                userKey?.Dispose();
+                userKey = new MemorySecret(key);
+            }
+            return true;
+        }
+        catch (LocalVaultUnsupportedException e) { Trace.WriteLine($"In-process unlock unavailable: {e.Message}"); return false; }
+        catch (CryptographicException) { return false; }
+        finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
+    }
+
     public async Task Load(bool sync)
     {
         int started;
-        lock (state) { EnsureUnlocked(); started = generation; }
+        bool local;
+        lock (state) { EnsureUnlocked(); started = generation; local = userKey != null; }
         if (sync)
         {
+            // `bw sync` refreshes the encrypted local vault and works while the CLI itself is locked.
             using var synced = await Run(null, started, "sync");
             if (synced.Code != 0) throw new InvalidOperationException("Bitwarden sync failed; local logins remain available.");
         }
-        using var output = await Run(null, started, "list", "items");
-        if (output.Code != 0) throw new InvalidOperationException("Could not load local Bitwarden logins.");
-        var parsed = VaultParser.Parse(output.Stdout.Memory.Span);
+        ParsedVault parsed;
+        if (local)
+        {
+            parsed = await Task.Run(() =>
+            {
+                MemorySecret key;
+                lock (state) { EnsureGeneration(started); key = userKey ?? throw new InvalidOperationException("Vault is locked."); }
+                try { return key.UseBytes(bytes => LocalVault.ReadVault(localVaultPath!, bytes)); }
+                catch (Exception e) when (e is LocalVaultUnsupportedException or CryptographicException)
+                {
+                    throw new InvalidOperationException("Could not read the local vault. Lock and unlock to use the CLI instead.");
+                }
+                catch (ObjectDisposedException) { throw new InvalidOperationException("Vault was locked; the operation was cancelled."); }
+            });
+        }
+        else
+        {
+            using var output = await Run(null, started, "list", "items");
+            if (output.Code != 0) throw new InvalidOperationException("Could not load local Bitwarden logins.");
+            parsed = VaultParser.Parse(output.Stdout.Memory.Span);
+        }
         try
         {
             lock (state)
@@ -168,7 +232,7 @@ sealed partial class BwClient : IDisposable
 
     bool IsValid(int version)
     {
-        lock (state) return !disposed && !blocked && session != null && generation == version;
+        lock (state) return !disposed && !blocked && HasAccess && generation == version;
     }
     public Task Lock() => Revoke(false);
     public Task Block() => Revoke(true);
@@ -185,6 +249,7 @@ sealed partial class BwClient : IDisposable
             if (blockAccess) blocked = true;
             generation++;
             session?.Dispose(); session = null;
+            userKey?.Dispose(); userKey = null;
             entries = []; ClearCredentials(); statusTask = null;
             previous = operations; operations = new();
             var prior = cleanup;
@@ -206,7 +271,7 @@ sealed partial class BwClient : IDisposable
         if (preview) throw new InvalidOperationException("Preview mode cannot access real vault credentials.");
         if (disposed || blocked) throw new InvalidOperationException("Vault access is blocked while Windows is locked or suspended.");
     }
-    void EnsureUnlocked() { EnsureAvailable(); if (session == null) throw new InvalidOperationException("Vault is locked."); }
+    void EnsureUnlocked() { EnsureAvailable(); if (!HasAccess) throw new InvalidOperationException("Vault is locked."); }
     void EnsureGeneration(int expected)
     {
         EnsureAvailable();
@@ -310,6 +375,7 @@ sealed partial class BwClient : IDisposable
             if (disposed) return;
             disposed = true; generation++;
             session?.Dispose(); session = null;
+            userKey?.Dispose(); userKey = null;
             entries = []; ClearCredentials(); cancellation = operations;
         }
         cancellation.Cancel(); cancellation.Dispose();
