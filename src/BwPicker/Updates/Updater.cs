@@ -228,18 +228,28 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
         }
     }
 
-    /// <summary>Run by the new instance: wait for the old one to exit, then remove its renamed exe.</summary>
+    /// <summary>
+    /// Run at every start. After an update, waits for the previous instance to exit and removes its renamed
+    /// exe; always removes leftover downloads (the zip and unpacked exe, ~90 MB per update) from %TEMP%.
+    /// </summary>
     public static void FinishUpdate(string[] args)
     {
         int index = Array.IndexOf(args, "--updated-from");
-        if (index < 0 || index + 1 >= args.Length || !int.TryParse(args[index + 1], out int pid)) return;
-        try { using var previous = Process.GetProcessById(pid); previous.WaitForExit(15_000); }
-        catch (ArgumentException) { } // already gone
+        if (index >= 0 && index + 1 < args.Length && int.TryParse(args[index + 1], out int pid))
+        {
+            try { using var previous = Process.GetProcessById(pid); previous.WaitForExit(15_000); }
+            catch (ArgumentException) { } // already gone
+        }
         string old = Environment.ProcessPath + ".old";
         for (int i = 0; i < 20 && File.Exists(old); i++)
         {
             try { File.Delete(old); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Thread.Sleep(250); }
+        }
+        foreach (string folder in Directory.EnumerateDirectories(Path.GetTempPath(), "BwPicker-update-*"))
+        {
+            try { Directory.Delete(folder, recursive: true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // retried next start
         }
     }
 }
