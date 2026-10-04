@@ -4,3 +4,4 @@ obj/
 
 # Local-only code (e.g. the --demo vault used for screenshots and recordings)
 *.local.cs
+CLAUDE.md
