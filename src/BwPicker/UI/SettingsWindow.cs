@@ -201,7 +201,7 @@ sealed class SettingsWindow : PanelWindow
     }
 
     static string ShortcutHint => OperatingSystem.IsLinux() && !X11Session
-        ? "On Wayland, bind it in your desktop's keyboard settings to: BwPicker --pick"
+        ? "Opens the picker over the app you're using; change it in your desktop's keyboard settings"
         : "Opens the picker over the app you're using";
 
 #if LINUX

@@ -95,10 +95,10 @@ static partial class Typer
 {
     public static void TypeCredentials(WindowContext target, CredentialLease credentials, bool submit, TypeFields fields)
     {
-        var keyboard = CreateKeyboard();
+        var keyboard = CreateKeyboard(target);
         try { new InputTyper(keyboard).Type(target.Handle, credentials, submit, target.HasOriginalIdentity, target.WindowStillMatches, fields); }
         finally { (keyboard as IDisposable)?.Dispose(); }
     }
 
-    private static partial IKeyboard CreateKeyboard();
+    private static partial IKeyboard CreateKeyboard(WindowContext target);
 }

@@ -29,6 +29,9 @@ sealed class GlobalHotkey : IDisposable
     /// <summary>Why the hotkey isn't available, if the generic "already in use" doesn't apply.</summary>
     public string? Problem => null;
 
+    /// <summary>Raised if the hotkey stops being available later (only used on Linux).</summary>
+    public event Action<string>? Unavailable { add { } remove { } }
+
     void Loop(uint modifiers, uint key)
     {
         threadId = GetCurrentThreadId();

@@ -9,17 +9,20 @@ sealed partial record WindowContext
 
     public bool WindowStillMatches()
     {
-        if (X11.Shared is not { } x || !x.Exists(Handle)) return false;
+        if (Unverified) return true;
+        if (X11.Shared is not { } x)
+            return AtSpi.Active is { } w && w.Id == Handle && w.Pid == ProcessId && AtSpi.Title(w) == Title;
+        if (!x.Exists(Handle)) return false;
         return x.Pid(Handle) == ProcessId && x.Title(Handle) == Title;
     }
 
     /// <summary>
-    /// The active window on X11. On Wayland the compositor doesn't reveal it, so the context is empty and the picker
-    /// copies instead of typing.
+    /// The active window: from X11 directly, or on Wayland from the accessibility bus. Without either (or without a way
+    /// to type on this Wayland desktop) the context is empty and the picker copies instead.
     /// </summary>
     public static WindowContext FromForeground()
     {
-        if (X11.Shared is not { } x) return new WindowContext(IntPtr.Zero, "", "", "");
+        if (X11.Shared is not { } x) return FromAccessibility();
         IntPtr window = x.ActiveWindow;
         if (window == IntPtr.Zero) return new WindowContext(IntPtr.Zero, "", "", "");
         string title = x.Title(window);
@@ -31,6 +34,21 @@ sealed partial record WindowContext
         {
             ProcessId = info == null ? 0 : pid,
             StartedAt = info?.StartedAt ?? 0,
+        };
+    }
+
+    static readonly Lazy<bool> canTypeOnWayland = new(() => WaylandInput.Available);
+
+    static WindowContext FromAccessibility()
+    {
+        if (!canTypeOnWayland.Value) return new WindowContext(IntPtr.Zero, "", "", "");
+        if (AtSpi.Active is not { } w || ProcessInfo.Read(w.Pid) is not { } info)
+            return new WindowContext(new IntPtr(-1), "", "", "") { Unverified = true };
+        string process = info.ImagePath.Length > 0 ? Path.GetFileName(info.ImagePath) : info.Command;
+        return new WindowContext(w.Id, process, FriendlyName(w.App, process), AtSpi.Title(w) ?? "")
+        {
+            ProcessId = w.Pid,
+            StartedAt = info.StartedAt,
         };
     }
 

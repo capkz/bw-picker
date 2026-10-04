@@ -1,12 +1,14 @@
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using Tmds.DBus.Protocol;
 
 namespace BwPicker;
 
 /// <summary>
 /// Ctrl+Alt+B. On X11 it is grabbed on the root window from a dedicated thread with its own display connection.
-/// Wayland doesn't let apps grab keys, so there (and on X11 too) running `BwPicker --pick` does the same through a
-/// socket in the user's runtime folder; the desktop's own keyboard-shortcut settings can bind that command.
+/// Wayland doesn't let apps grab keys; there BwPicker asks the desktop for the shortcut through the GlobalShortcuts
+/// portal (GNOME 48+, KDE Plasma, Hyprland…), which may show a one-time confirmation. Everywhere, running
+/// `BwPicker --pick` does the same through a socket in the user's runtime folder, for desktops without that portal.
 /// <see cref="Pressed"/> is raised on a background thread; marshal to the UI thread before use.
 /// </summary>
 sealed class GlobalHotkey : IDisposable
@@ -19,7 +21,12 @@ sealed class GlobalHotkey : IDisposable
     readonly Socket? listener;
     volatile bool running = true;
 
+    IDisposable? portalWatch;
+
     public event Action? Pressed;
+
+    /// <summary>Raised later (with what to do instead) if the desktop turns out not to offer the shortcut.</summary>
+    public event Action<string>? Unavailable;
 
     public GlobalHotkey()
     {
@@ -29,14 +36,63 @@ sealed class GlobalHotkey : IDisposable
             thread = new Thread(Loop) { IsBackground = true, Name = "BwPicker hotkey" };
             thread.Start();
         }
-        else registered.TrySetResult(false);
+        else
+        {
+            // The portal may wait on a confirmation dialog, so report success now and failure through Unavailable.
+            registered.TrySetResult(true);
+            _ = AtSpi.Start();
+            _ = BindThroughPortal();
+        }
     }
 
     /// <summary>False if the key couldn't be grabbed; <see cref="Problem"/> says why when it isn't simply taken.</summary>
     public bool Registered => registered.Task.GetAwaiter().GetResult();
 
-    public string? Problem => X11.Available ? null :
-        $"On Wayland, add a keyboard shortcut in your desktop settings (e.g. Ctrl+Alt+B) that runs: {Environment.ProcessPath} --pick";
+    public string? Problem => null;
+
+    static string ManualShortcutHint =>
+        $"Add a keyboard shortcut in your desktop settings (e.g. Ctrl+Alt+B) that runs: {Environment.ProcessPath} --pick";
+
+    async Task BindThroughPortal()
+    {
+        const string Shortcuts = "org.freedesktop.portal.GlobalShortcuts";
+        try
+        {
+            if (await Portal.Connect().ConfigureAwait(false) is not { } bus || await Portal.Version(bus, Shortcuts).ConfigureAwait(false) == 0)
+            {
+                Unavailable?.Invoke("This desktop can't give BwPicker a global shortcut. " + ManualShortcutHint);
+                return;
+            }
+            portalWatch = await bus.WatchSignalAsync(Portal.Service, Portal.ObjectPath, Shortcuts, "Activated",
+                (Message m, object? _) => { var r = m.GetBodyReader(); r.ReadObjectPathAsString(); return r.ReadString(); },
+                (Notification<string> n) => { if (n.HasValue && n.Value == "pick" && running) Pressed?.Invoke(); },
+                ObserverFlags.None, false, null).ConfigureAwait(false);
+
+            string token = Portal.Token("gs"), sessionToken = Portal.Token("gss");
+            var (code, results) = await Portal.Request(bus, token, Portal.Call(bus, Shortcuts, "CreateSession", "a{sv}", w => w.WriteDictionary(
+                [Portal.Option("handle_token", token), Portal.Option("session_handle_token", sessionToken)])), TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            if (code != 0 || !results.TryGetValue("session_handle", out var handle)) throw new InvalidOperationException("no session");
+            string session = handle.Type == VariantValueType.ObjectPath ? handle.GetObjectPathAsString() : handle.GetString();
+
+            token = Portal.Token("gs");
+            (code, _) = await Portal.Request(bus, token, Portal.Call(bus, Shortcuts, "BindShortcuts", "oa(sa{sv})sa{sv}", w =>
+            {
+                w.WriteObjectPath(session);
+                var list = w.WriteArrayStart(DBusType.Struct);
+                w.WriteStructureStart();
+                w.WriteString("pick");
+                w.WriteDictionary([Portal.Option("description", "Open BwPicker over the app you're using"), Portal.Option("preferred_trigger", "CTRL+ALT+b")]);
+                w.WriteArrayEnd(list);
+                w.WriteString("");
+                w.WriteDictionary([Portal.Option("handle_token", token)]);
+            }), TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+            if (code != 0) Unavailable?.Invoke("The shortcut wasn't set up. " + ManualShortcutHint);
+        }
+        catch (Exception e) when (e is DBusExceptionBase or InvalidOperationException or TimeoutException)
+        {
+            Unavailable?.Invoke("BwPicker couldn't set up its shortcut. " + ManualShortcutHint);
+        }
+    }
 
     /// <summary>The socket `--pick` connects to; only this user can reach their runtime folder.</summary>
     public static string? SocketPath =>
@@ -122,6 +178,7 @@ sealed class GlobalHotkey : IDisposable
     public void Dispose()
     {
         running = false;
+        portalWatch?.Dispose();
         listener?.Dispose();
         if (SocketPath is { } path) { try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
         thread?.Join(1000);

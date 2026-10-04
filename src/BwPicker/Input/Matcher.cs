@@ -13,9 +13,16 @@ sealed partial record WindowContext(IntPtr Handle, string ProcessName, string Ap
     /// <summary>The target runs as administrator and this app doesn't, so typed input would be discarded.</summary>
     public bool BlocksTyping { get; init; }
 
+    /// <summary>
+    /// The desktop couldn't tell which app is in front (Wayland without accessibility info for it), so typing goes to
+    /// whatever has focus without the identity and focus checks. The picker says so before you choose.
+    /// </summary>
+    public bool Unverified { get; init; }
+
     /// <summary>True if the window belongs to the same process instance as when the hotkey was pressed.</summary>
     public bool HasOriginalIdentity()
     {
+        if (Unverified) return true;
         if (ProcessId == 0 || StartedAt == 0 || !WindowStillMatches()) return false;
         return ProcessInfo.Read(ProcessId)?.StartedAt == StartedAt;
     }

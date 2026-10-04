@@ -48,5 +48,8 @@ sealed class WindowsKeyboard : IKeyboard
 
 static partial class Typer
 {
-    private static partial IKeyboard CreateKeyboard() => new WindowsKeyboard();
+    private static partial IKeyboard CreateKeyboard(WindowContext target) => new WindowsKeyboard();
+
+    /// <summary>BwPicker brings the destination to the front itself before typing.</summary>
+    public static bool ActivatesTarget => true;
 }

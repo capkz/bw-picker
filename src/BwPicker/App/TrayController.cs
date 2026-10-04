@@ -45,6 +45,7 @@ sealed class TrayController : IDisposable
         hotkey = new GlobalHotkey();
         hotkey.Pressed += () => Dispatcher.UIThread.Post(() => _ = OnHotkey());
         if (!hotkey.Registered) Notify(hotkey.Problem ?? $"{HotkeyLabel} is already used by another app.", Notice.Warning);
+        hotkey.Unavailable += message => Notify(message, Notice.Warning);
 
         lockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         lockTimer.Tick += async (_, _) =>

@@ -67,7 +67,8 @@ sealed class PickerWindow : PanelWindow
         search.InnerLeftContent = new TextBlock { Text = "⌕", FontSize = 18, Foreground = Ui.Brush(P.SubtleText), Margin = new Thickness(12, 0, 2, 2), VerticalAlignment = VerticalAlignment.Center };
 
         count = Ui.Text("", 11.5, P.SubtleText);
-        var into = Ui.Text(target.AppName.Length > 0 ? $"Typing into {target.AppName}" : "", 11.5, P.SubtleText);
+        var into = Ui.Text(target.Unverified ? "Typing into the focused window (unverified)"
+            : target.AppName.Length > 0 ? $"Typing into {target.AppName}" : "", 11.5, P.SubtleText);
         into.HorizontalAlignment = HorizontalAlignment.Right;
         var meta = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(4, 10, 4, 0) };
         meta.Children.Add(count);
@@ -97,6 +98,7 @@ sealed class PickerWindow : PanelWindow
         Refill();
 
         AddHandler(KeyDownEvent, OnKeyDown, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, (_, e) => heldModifiers.Remove(e.Key), RoutingStrategies.Tunnel);
         Deactivated += (_, _) => { if (CloseOnDeactivate && !working) Close(); };
         bw.EntriesChanged += OnEntriesChanged;
         Closed += (_, _) => bw.EntriesChanged -= OnEntriesChanged;
@@ -154,8 +156,21 @@ sealed class PickerWindow : PanelWindow
         count.Text = $"{results.Count} {(results.Count == 1 ? "LOGIN" : "LOGINS")}";
     }
 
+    // Modifier keys held in the picker. Where BwPicker can't read the keyboard state after the picker closes
+    // (Wayland), typing waits until these are released, so Shift+Enter doesn't type with Shift held.
+    readonly HashSet<Key> heldModifiers = [];
+
+    static bool IsModifier(Key key) => key is Key.LeftShift or Key.RightShift or Key.LeftCtrl or Key.RightCtrl or
+        Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin;
+
+    async Task WaitForModifierRelease()
+    {
+        for (int i = 0; i < 150 && heldModifiers.Count > 0; i++) await Task.Delay(20);
+    }
+
     async void OnKeyDown(object? sender, KeyEventArgs e)
     {
+        if (IsModifier(e.Key)) heldModifiers.Add(e.Key);
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control), shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
@@ -193,6 +208,13 @@ sealed class PickerWindow : PanelWindow
         {
             using var credential = await bw.GetCredentials(entry.Id);
             if (!credential.IsValid) throw new InvalidOperationException("Vault was locked.");
+            if (action == PickAction.Type && !Typer.ActivatesTarget && target.Handle != IntPtr.Zero)
+            {
+                // Hand focus back to the app first; the desktop returns it to the window that had it.
+                await WaitForModifierRelease();
+                Hide();
+                await Task.Delay(200);
+            }
             switch (action)
             {
                 case PickAction.CopyUsername: CopyOrWarn(credential.Username.AsSpan(), "username", credential); break;
@@ -218,7 +240,7 @@ sealed class PickerWindow : PanelWindow
         if (target.Handle == IntPtr.Zero)
         {
             notify(OperatingSystem.IsLinux()
-                ? "This desktop doesn't let apps type into other windows (Wayland). Use Ctrl+U / Ctrl+P to copy instead."
+                ? "This desktop doesn't let BwPicker type into other apps. Use Ctrl+U / Ctrl+P to copy instead."
                 : "BwPicker couldn't tell which app to type into. Use Ctrl+U / Ctrl+P to copy instead.", Notice.Warning);
             return;
         }

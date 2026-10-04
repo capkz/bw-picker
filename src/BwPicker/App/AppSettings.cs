@@ -12,6 +12,9 @@ sealed class AppSettings
     /// <summary>Windows: run elevated from Program Files so typing reaches apps that run as administrator. On by default.</summary>
     public bool RunAsAdmin { get; set; } = true;
 
+    /// <summary>Linux/Wayland: the desktop's approval for BwPicker to type (RemoteDesktop portal restore token).</summary>
+    public string? RemoteDesktopToken { get; set; }
+
     /// <summary>Set just before switching administrator mode, so the restarted instance reopens Settings and says so.</summary>
     public bool ReopenSettingsAfterSwitch { get; set; }
 

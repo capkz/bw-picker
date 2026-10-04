@@ -163,5 +163,11 @@ sealed unsafe class X11Keyboard : IKeyboard, IDisposable
 
 static partial class Typer
 {
-    private static partial IKeyboard CreateKeyboard() => new X11Keyboard();
+    private static partial IKeyboard CreateKeyboard(WindowContext target) => X11.Available ? new X11Keyboard() : new WaylandKeyboard(target);
+
+    /// <summary>
+    /// On X11 BwPicker activates the destination itself. Wayland doesn't allow that, so the picker hides first and the
+    /// desktop gives focus back to the window that had it.
+    /// </summary>
+    public static bool ActivatesTarget => X11.Available;
 }
