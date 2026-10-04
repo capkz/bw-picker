@@ -31,33 +31,30 @@ static class AdminInstall
     }
 
     /// <summary>
-    /// Runs in the elevated helper: copies the app (exe + native libraries) into Program Files, then starts that copy,
-    /// which waits for the old instance to exit and sets up the administrator startup task.
+    /// Runs in the elevated helper: copies BwPicker.exe into Program Files, then starts that copy, which restores its
+    /// native libraries from the copies embedded in it (<see cref="NativeLibraries"/>), waits for the old instance to
+    /// exit and sets up the administrator startup task. Only the exe is copied: the folder it runs from is often
+    /// Downloads, and any other DLL there would otherwise end up loaded with administrator rights at every sign-in.
     /// </summary>
     public static void RunHelper(string[] args)
     {
         if (!ProcessInfo.CurrentIsElevated) return;
         int index = Array.IndexOf(args, "--install-admin");
         string previousPid = index >= 0 && index + 1 < args.Length ? args[index + 1] : "0";
-        string source = AppContext.BaseDirectory, target = InstallFolder;
+        string source = Environment.ProcessPath!, target = InstallFolder, exe = Path.Combine(target, "BwPicker.exe");
         Directory.CreateDirectory(target);
-        if (!string.Equals(Path.GetFullPath(source).TrimEnd('\\'), Path.GetFullPath(target).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(Path.GetFullPath(source), Path.GetFullPath(exe), StringComparison.OrdinalIgnoreCase))
         {
-            foreach (string file in Directory.GetFiles(source))
+            // Files in use (an older admin copy) can be renamed aside; they're removed at the next start. Every DLL goes,
+            // so only the libraries the new exe carries are in the folder.
+            foreach (string file in Directory.GetFiles(target, "*.dll").Append(exe).Where(File.Exists))
             {
-                string name = Path.GetFileName(file);
-                if (!Updater.IsAppFile(name)) continue;
-                string destination = Path.Combine(target, name);
-                // A file in use (e.g. an older admin copy) can be renamed aside; it's removed at the next start.
-                if (File.Exists(destination))
-                {
-                    if (File.Exists(destination + ".old")) File.Delete(destination + ".old");
-                    File.Move(destination, destination + ".old");
-                }
-                File.Copy(file, destination);
+                if (File.Exists(file + ".old")) File.Delete(file + ".old");
+                File.Move(file, file + ".old");
             }
+            File.Copy(source, exe);
         }
-        Process.Start(new ProcessStartInfo(Path.Combine(target, "BwPicker.exe"))
+        Process.Start(new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
             ArgumentList = { "--enable-admin-autostart", "--updated-from", previousPid },

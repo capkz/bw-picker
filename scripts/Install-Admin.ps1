@@ -44,11 +44,11 @@ if ($Uninstall) {
 if (-not (Test-Path $Source)) { throw "BwPicker.exe not found at $Source" }
 $version = (Get-Item $Source).VersionInfo.ProductVersion
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-# BwPicker.exe plus the native libraries next to it (SkiaSharp, HarfBuzz, ANGLE).
-$sourceDir = Split-Path (Resolve-Path $Source).Path
+# Only BwPicker.exe: it carries its native libraries (SkiaSharp, HarfBuzz, ANGLE) and writes them next to itself when it
+# starts. Copying every DLL from the source folder (often Downloads) could plant one that then loads as administrator.
+Get-ChildItem $target -Filter *.dll -ErrorAction SilentlyContinue | Remove-Item -Force
 Copy-Item $Source $exe -Force
-Get-ChildItem $sourceDir -Filter *.dll | Copy-Item -Destination $target -Force
-Get-ChildItem $target -Include *.exe, *.dll -Recurse | Unblock-File
+Unblock-File $exe
 
 # BwPicker needs the official Bitwarden CLI for signing in and syncing.
 $bw = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\bw.exe'

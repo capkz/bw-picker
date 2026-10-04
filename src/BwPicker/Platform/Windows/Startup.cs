@@ -109,7 +109,9 @@ static class Startup
               <Actions Context="Author"><Exec><Command>{System.Security.SecurityElement.Escape(Exe)}</Command></Exec></Actions>
             </Task>
             """;
-        string file = Path.Combine(Path.GetTempPath(), $"bwpicker-task-{Guid.NewGuid():N}.xml");
+        // Next to the exe (admin mode means only administrators can write there), not in %TEMP%: a program running as
+        // this user could rewrite the file there before schtasks reads it and get its own command an elevated task.
+        string file = Path.Combine(Path.GetDirectoryName(Exe)!, $"bwpicker-task-{Guid.NewGuid():N}.xml");
         try
         {
             File.WriteAllText(file, xml, System.Text.Encoding.Unicode);

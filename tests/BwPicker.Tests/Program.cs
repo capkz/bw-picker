@@ -265,6 +265,17 @@ static class Tests
         Assert(!Startup.InProtectedFolder(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "BwPicker", "BwPicker.exe")),
             "User-writable folder treated as protected");
         Assert(!Startup.InProtectedFolder(Path.Combine(pf, "..", "Users", "x.exe")), "Path traversal out of Program Files accepted");
+        // Admin-mode startup drops DLLs the app doesn't carry and leaves everything else alone.
+        string appFolder = Directory.CreateTempSubdirectory("bwpicker-strays-").FullName;
+        try
+        {
+            foreach (string name in new[] { "libSkiaSharp.dll", "version.dll", "Avalonia.Base.dll", "notes.txt" })
+                File.WriteAllText(Path.Combine(appFolder, name), "");
+            NativeLibraries.RemoveStrays(appFolder, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "LIBSKIASHARP.DLL" });
+            var left = Directory.GetFiles(appFolder).Select(Path.GetFileName).Order().ToArray();
+            Assert(left.SequenceEqual(["libSkiaSharp.dll", "notes.txt"]), "Stray DLL cleanup removed the wrong files: " + string.Join(", ", left));
+        }
+        finally { Directory.Delete(appFolder, recursive: true); }
 #endif
         Console.WriteLine("PASS: release version/prerelease/origin checks and checksum parsing; admin-autostart folder check.");
     }
@@ -379,6 +390,30 @@ static class Tests
         finally { File.Delete(planted); }
         Assert(TrustedCli.Trusted("/usr/bin/env", isFile: true), "Root-owned system executable not trusted");
         Assert(!TrustedCli.Trusted("/usr/bin", isFile: true), "A folder accepted as the CLI executable");
+        // A link to a trusted bw is only as trustworthy as the folder holding the link (it could be repointed).
+        string link = Path.Combine("/tmp", $"bw-link-{Environment.ProcessId}");
+        File.CreateSymbolicLink(link, "/usr/bin/env");
+        try { Assert(TrustedCli.TrustedLinkTarget(link) == null, "Symlink in a world-writable folder followed"); }
+        finally { File.Delete(link); }
+        Assert(TrustedCli.TrustedLinkTarget("/usr/bin/env") is { } direct && TrustedCli.Trusted(direct, isFile: true), "Plain trusted path not resolved");
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (TrustedCli.Trusted(home, isFile: false))
+        {
+            // A symlinked folder is checked where it really is: one pointing into /tmp is refused.
+            string trustedDir = Path.Combine(home, $".bwpicker-test-{Environment.ProcessId}");
+            Directory.CreateDirectory(trustedDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            try
+            {
+                string toTmp = Path.Combine(trustedDir, "tmp");
+                Directory.CreateSymbolicLink(toTmp, "/tmp");
+                Assert(!TrustedCli.Trusted(Path.Combine(toTmp, "bw"), isFile: true), "World-writable folder behind a symlink trusted");
+                string toEnv = Path.Combine(trustedDir, "bw");
+                File.CreateSymbolicLink(toEnv, "/usr/bin/env");
+                // /usr/bin/env may itself be a link (uutils coreutils), so compare with where it ends up.
+                Assert(TrustedCli.TrustedLinkTarget(toEnv) == TrustedCli.TrustedLinkTarget("/usr/bin/env"), "Symlink in a user-only folder not followed");
+            }
+            finally { Directory.Delete(trustedDir, recursive: true); }
+        }
 #endif
         foreach (string server in new[] { "http://example.com", "https://user:password@example.com", "not-a-url" })
             await Throws(() => { BwClient.ValidateServer(server); return Task.CompletedTask; });

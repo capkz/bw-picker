@@ -19,10 +19,12 @@ static class NativeLibraries
     {
         var assembly = typeof(NativeLibraries).Assembly;
         string folder = AppContext.BaseDirectory;
+        var libraries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string resource in assembly.GetManifestResourceNames().Where(n => n.StartsWith(Prefix, StringComparison.Ordinal)))
         {
             string name = resource[Prefix.Length..];
             if (name.Contains('/') || name.Contains('\\') || !name.EndsWith(Extension, StringComparison.OrdinalIgnoreCase)) continue;
+            libraries.Add(name);
             string path = Path.Combine(folder, name);
             using var stream = assembly.GetManifestResourceStream(resource)!;
             byte[] expected = new byte[stream.Length];
@@ -40,7 +42,28 @@ static class NativeLibraries
                 return false;
             }
         }
+#if WINDOWS
+        // In administrator mode the folder is BwPicker's own and loads as administrator: drop any DLL the app doesn't
+        // carry (left by older installs, which copied every DLL from the folder they ran from). Not in a normal
+        // install, whose exe may sit in a shared folder such as Downloads. A build without embedded libraries can't tell.
+        if (libraries.Count > 0 && Startup.AdminMode) RemoveStrays(folder, libraries);
+#endif
         return true;
+    }
+
+    /// <summary>Deletes every DLL in <paramref name="folder"/> not in <paramref name="keep"/>; one in use is renamed to *.old (removed at the next start).</summary>
+    internal static void RemoveStrays(string folder, IReadOnlySet<string> keep)
+    {
+        foreach (string file in Directory.GetFiles(folder, "*.dll"))
+        {
+            if (keep.Contains(Path.GetFileName(file))) continue;
+            try { File.Delete(file); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                try { File.Move(file, file + ".old", overwrite: true); }
+                catch (Exception again) when (again is IOException or UnauthorizedAccessException) { } // tried again next start
+            }
+        }
     }
 
     /// <summary>The UI can't start without these libraries, so report the problem natively.</summary>

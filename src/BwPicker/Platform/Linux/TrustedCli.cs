@@ -26,10 +26,10 @@ sealed class TrustedCli : IDisposable
         foreach (string candidate in Candidates().Distinct())
         {
             if (!File.Exists(candidate)) continue;
-            string target;
-            try { target = new FileInfo(candidate).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? candidate; }
+            string? target;
+            try { target = TrustedLinkTarget(candidate); }
             catch (IOException) { continue; }
-            if (!Trusted(System.IO.Path.GetDirectoryName(candidate)!, isFile: false) || !Trusted(target, isFile: true))
+            if (target == null || !Trusted(target, isFile: true))
                 throw new InvalidOperationException($"{candidate} or a folder above it can be changed by other users, so BwPicker won't run it. " +
                     "Install the Bitwarden CLI somewhere only you or root can write to.");
             try { return new TrustedCli(new FileStream(target, FileMode.Open, FileAccess.Read, FileShare.Read), candidate); }
@@ -54,23 +54,78 @@ sealed class TrustedCli : IDisposable
     }
 
     /// <summary>
-    /// The path and each folder above it are owned by root or this user, with no write access for anyone else. Group
-    /// write is fine for root's group or this user's own primary group (Ubuntu-style per-user groups, umask 002).
+    /// Follows <paramref name="path"/> through every symlink to the file it finally names. Each link's folder must be
+    /// trusted too, or whoever can write there could repoint the link between this check and running the path. Null
+    /// if a folder along the way isn't trusted or the chain doesn't end.
+    /// </summary>
+    internal static string? TrustedLinkTarget(string path)
+    {
+        string current = System.IO.Path.GetFullPath(path);
+        for (int hops = 0; hops < 40; hops++)
+        {
+            string folder = System.IO.Path.GetDirectoryName(current)!;
+            if (!Trusted(folder, isFile: false)) return null;
+            if (new FileInfo(current).LinkTarget is not { } link) return current;
+            current = System.IO.Path.GetFullPath(link, folder);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The path and each folder above it are owned by root or this user, with no write access for anyone else. Folders
+    /// are checked where they really are (symlinked folders resolved), so a link can't hide a writable one. Group write
+    /// is fine for root's group, or for this user's own per-user group (Ubuntu-style, umask 002): named after the user
+    /// and with no other members. A primary group shared with other users, like "users", doesn't count.
     /// </summary>
     internal static bool Trusted(string path, bool isFile)
     {
         uint me = geteuid(), myGroup = getegid();
+        string full = System.IO.Path.GetFullPath(path);
+        string? folder = System.IO.Path.GetDirectoryName(full);
+        if (folder != null)
+        {
+            if (RealPath(folder) is not { } realFolder) return false;
+            full = System.IO.Path.Join(realFolder, System.IO.Path.GetFileName(full));
+        }
         bool first = true;
-        for (string? current = System.IO.Path.GetFullPath(path); current != null; current = System.IO.Path.GetDirectoryName(current))
+        for (string? current = full; current != null; current = System.IO.Path.GetDirectoryName(current))
         {
             if (!Stat(current, out uint owner, out uint group, out uint mode)) return false;
             if (owner != 0 && owner != me) return false;
             if ((mode & 0x02) != 0) return false; // S_IWOTH
-            if ((mode & 0x10) != 0 && group != 0 && group != myGroup) return false; // S_IWGRP
+            if ((mode & 0x10) != 0 && group != 0 && (group != myGroup || !IsPersonalGroup(group, me))) return false; // S_IWGRP
             if (first && isFile && ((mode & 0xF000) != 0x8000 || (mode & 0x49) == 0)) return false; // a regular, executable file
             first = false;
         }
         return true;
+    }
+
+    static readonly object accountLookup = new();
+
+    static string? RealPath(string path)
+    {
+        IntPtr resolved = realpath(path, IntPtr.Zero);
+        if (resolved == IntPtr.Zero) return null;
+        try { return Marshal.PtrToStringUTF8(resolved); }
+        finally { free(resolved); }
+    }
+
+    /// <summary>The group is named after the user and lists no members (nobody else has it as a supplementary group).</summary>
+    static bool IsPersonalGroup(uint gid, uint uid)
+    {
+        // struct passwd and struct group both start with the name; gr_mem follows gr_name, gr_passwd and gr_gid (LP64).
+        // getpwuid/getgrgid return static storage, so read them under one lock.
+        lock (accountLookup)
+        {
+            IntPtr user = getpwuid(uid), group = getgrgid(gid);
+            if (user == IntPtr.Zero || group == IntPtr.Zero) return false;
+            string? userName = Marshal.PtrToStringUTF8(Marshal.ReadIntPtr(user));
+            string? groupName = Marshal.PtrToStringUTF8(Marshal.ReadIntPtr(group));
+            IntPtr members = Marshal.ReadIntPtr(group, 3 * IntPtr.Size);
+            bool noOtherMembers = members == IntPtr.Zero || Marshal.ReadIntPtr(members) == IntPtr.Zero ||
+                (Marshal.PtrToStringUTF8(Marshal.ReadIntPtr(members)) == userName && Marshal.ReadIntPtr(members, IntPtr.Size) == IntPtr.Zero);
+            return userName != null && userName == groupName && noOtherMembers;
+        }
     }
 
     static unsafe bool Stat(string path, out uint owner, out uint group, out uint mode)
@@ -93,6 +148,10 @@ sealed class TrustedCli : IDisposable
     [DllImport("libc", SetLastError = true)] static extern uint geteuid();
     [DllImport("libc", SetLastError = true)] static extern uint getegid();
     [DllImport("libc", SetLastError = true)] static extern unsafe int statx(int dirfd, string path, int flags, uint mask, byte* buffer);
+    [DllImport("libc", SetLastError = true)] static extern IntPtr realpath(string path, IntPtr resolved);
+    [DllImport("libc")] static extern void free(IntPtr pointer);
+    [DllImport("libc", SetLastError = true)] static extern IntPtr getpwuid(uint uid);
+    [DllImport("libc", SetLastError = true)] static extern IntPtr getgrgid(uint gid);
 }
 
 static class CliEnvironment

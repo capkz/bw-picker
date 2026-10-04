@@ -157,7 +157,7 @@ sealed class TrayController : IDisposable
         else if (manual) Notify(updater.Status, Notice.Info);
     }
 
-    async void InstallUpdate(string payload)
+    async void InstallUpdate(UpdatePayload payload)
     {
         try
         {

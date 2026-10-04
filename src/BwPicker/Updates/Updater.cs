@@ -20,6 +20,12 @@ static class AppVersion
 
 sealed record ReleaseInfo(Version Version, string Tag, Uri Page, Uri Package, Uri Checksums);
 
+/// <summary>
+/// A downloaded update: the folder holding its files, and each file's SHA-256 taken from the verified package itself
+/// (not from disk), so the copies can be checked again once they are in the app folder.
+/// </summary>
+sealed record UpdatePayload(string Folder, IReadOnlyDictionary<string, byte[]> Hashes);
+
 /// <summary>Checks GitHub Releases and installs updates in place, verifying the release's SHA-256 checksum.</summary>
 sealed class Updater(AppSettings settings, HttpClient? http = null)
 {
@@ -39,8 +45,8 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
     public string Status { get; private set; } = AppVersion.IsDevelopment ? "Development build" : "";
     public bool Busy => busy;
     public event EventHandler? Changed;
-    /// <summary>Raised with the folder holding the verified new app files; the app installs them and restarts.</summary>
-    public event EventHandler<string>? ReadyToInstall;
+    /// <summary>Raised with the verified new app files; the app installs them and restarts.</summary>
+    public event EventHandler<UpdatePayload>? ReadyToInstall;
 
     public bool CheckIsDue =>
         settings.CheckForUpdates && !AppVersion.IsDevelopment &&
@@ -70,9 +76,9 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
         SetState(true, $"Downloading {release.Version.ToString(3)}…");
         try
         {
-            string exe = await DownloadVerified(release, CancellationToken.None);
+            var payload = await DownloadVerified(release, CancellationToken.None);
             SetState(true, "Restarting…");
-            ReadyToInstall?.Invoke(this, exe);
+            ReadyToInstall?.Invoke(this, payload);
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException or IOException or InvalidDataException)
         {
@@ -134,23 +140,24 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
         throw new InvalidOperationException("The release has no checksum for the download.");
     }
 
-    async Task<string> DownloadVerified(ReleaseInfo release, CancellationToken cancel)
+    async Task<UpdatePayload> DownloadVerified(ReleaseInfo release, CancellationToken cancel)
     {
         string checksums = await http.GetStringAsync(release.Checksums, cancel);
         if (checksums.Length > 64 * 1024) throw new InvalidOperationException("The checksum file is unexpectedly large.");
         byte[] expected = ParseChecksum(checksums, PackageName);
 
-        string folder = Path.Combine(Path.GetTempPath(), "BwPicker-update-" + release.Version.ToString(3));
-        if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
-        Directory.CreateDirectory(folder);
+        // A new folder with a random name, owner-only on Linux (where the temp folder is shared by every user).
+        string folder = Directory.CreateTempSubdirectory("BwPicker-update-").FullName;
         string zip = Path.Combine(folder, PackageName);
 
+        // One handle from download to extraction, shared with nobody: the bytes that are hashed are the bytes unpacked.
+        await using var file = new FileStream(zip, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         using (var response = await http.GetAsync(release.Package, HttpCompletionOption.ResponseHeadersRead, cancel))
         {
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength > MaxPackageBytes) throw new InvalidOperationException("The download is unexpectedly large.");
             await using var source = await response.Content.ReadAsStreamAsync(cancel);
-            await using var file = File.Create(zip);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buffer = new byte[81920];
             long total = 0;
             int read;
@@ -158,34 +165,50 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
             {
                 total += read;
                 if (total > MaxPackageBytes) throw new InvalidOperationException("The download is unexpectedly large.");
+                hash.AppendData(buffer, 0, read);
                 await file.WriteAsync(buffer.AsMemory(0, read), cancel);
             }
+            if (!CryptographicOperations.FixedTimeEquals(hash.GetHashAndReset(), expected))
+                throw new InvalidOperationException("The download doesn't match the release checksum, so it wasn't installed.");
         }
-
-        byte[] actual;
-        await using (var file = File.OpenRead(zip)) actual = await SHA256.HashDataAsync(file, cancel);
-        if (!CryptographicOperations.FixedTimeEquals(actual, expected))
-            throw new InvalidOperationException("The download doesn't match the release checksum, so it wasn't installed.");
+        await file.FlushAsync(cancel);
+        file.Position = 0;
 
         // The app is the executable plus the native libraries next to it; take only those, from the zip's root.
         string payload = Path.Combine(folder, "app");
         Directory.CreateDirectory(payload);
+        var hashes = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         long extracted = 0;
-        using (var archive = ZipFile.OpenRead(zip))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Read, leaveOpen: true))
         {
             foreach (var entry in archive.Entries)
             {
                 if (!IsAppFile(entry.FullName)) continue;
                 extracted += entry.Length;
                 if (entry.Length > MaxPackageBytes || extracted > MaxPackageBytes) throw new InvalidOperationException("The release package is unexpectedly large.");
-                entry.ExtractToFile(Path.Combine(payload, entry.Name), overwrite: true);
+                hashes[entry.Name] = await Extract(entry, Path.Combine(payload, entry.Name), cancel);
             }
         }
-        string exe = Path.Combine(payload, ExeName);
-        if (!File.Exists(exe)) throw new InvalidOperationException($"The release package has no {ExeName}.");
-        if (await ReadVersion(exe, cancel) != release.Version.ToString(3))
+        if (!hashes.ContainsKey(ExeName)) throw new InvalidOperationException($"The release package has no {ExeName}.");
+        if (await ReadVersion(Path.Combine(payload, ExeName), cancel) != release.Version.ToString(3))
             throw new InvalidOperationException("The downloaded app reports a different version than the release.");
-        return payload;
+        return new UpdatePayload(payload, hashes);
+    }
+
+    /// <summary>Writes a zip entry to <paramref name="path"/> and returns the SHA-256 of what the package holds.</summary>
+    static async Task<byte[]> Extract(ZipArchiveEntry entry, string path, CancellationToken cancel)
+    {
+        await using var source = entry.Open();
+        await using var target = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await source.ReadAsync(buffer, cancel)) > 0)
+        {
+            hash.AppendData(buffer, 0, read);
+            await target.WriteAsync(buffer.AsMemory(0, read), cancel);
+        }
+        return hash.GetHashAndReset();
     }
 
     /// <summary>The version a downloaded (and checksum-verified) executable reports.</summary>
@@ -248,13 +271,14 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
     /// <summary>
     /// Swaps the app's files (exe and native libraries) for the new set and starts the new exe. Windows allows renaming
     /// files that are in use, so each current file becomes "*.old" (removed by the new instance); if anything fails,
-    /// every file is put back.
+    /// every file is put back. Each copy is hashed again once it is in the app folder: the download folder can be
+    /// changed by other programs running as this user, while in administrator mode the app folder can't.
     /// </summary>
-    public static void InstallAndRelaunch(string payloadFolder)
+    public static void InstallAndRelaunch(UpdatePayload payload)
     {
         string current = Environment.ProcessPath ?? throw new InvalidOperationException("Can't locate the running app.");
         string folder = Path.GetDirectoryName(current)!;
-        var files = Directory.GetFiles(payloadFolder).Select(Path.GetFileName).OfType<string>().Where(IsAppFile).ToList();
+        var files = payload.Hashes.Keys.Where(IsAppFile).ToList();
         if (!files.Contains(ExeName, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException($"The update has no {ExeName}.");
 
         var moved = new List<string>();
@@ -266,8 +290,10 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
                 string target = Path.Combine(folder, name), old = target + ".old";
                 if (File.Exists(old)) File.Delete(old);
                 if (File.Exists(target)) { File.Move(target, old); moved.Add(target); }
-                File.Copy(Path.Combine(payloadFolder, name), target);
+                File.Copy(Path.Combine(payload.Folder, name), target);
                 copied.Add(target);
+                if (!CryptographicOperations.FixedTimeEquals(HashFile(target), payload.Hashes[name]))
+                    throw new InvalidOperationException("The update's files changed after they were verified, so it wasn't installed.");
             }
             Process.Start(new ProcessStartInfo(current) { UseShellExecute = false, ArgumentList = { "--updated-from", Environment.ProcessId.ToString() } });
         }
@@ -280,6 +306,12 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
                     (OperatingSystem.IsWindows() ? "%LOCALAPPDATA%\\Programs\\BwPicker" : "~/.local/share/BwPicker") + ", or update manually.");
             throw;
         }
+    }
+
+    static byte[] HashFile(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return SHA256.HashData(stream);
     }
 
     /// <summary>
