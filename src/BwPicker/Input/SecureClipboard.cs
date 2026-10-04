@@ -16,7 +16,7 @@ static class SecureClipboard
 {
     static readonly object gate = new();
     static readonly ClipboardOwnership ownership = new();
-    static NativeWindow? owner;
+    static IntPtr owner; // message-only window that owns the clipboard data we publish
     static System.Threading.Timer? clearTimer;
     static long deadline;
 
@@ -25,8 +25,8 @@ static class SecureClipboard
         lock (gate)
         {
             if (!valid()) throw new InvalidOperationException("Vault was locked; nothing was copied.");
-            owner ??= CreateOwner();
-            if (!OpenClipboard(owner.Handle)) throw new InvalidOperationException("Clipboard is busy. Please try copying again.");
+            if (owner == IntPtr.Zero) owner = CreateOwner();
+            if (!OpenClipboard(owner)) throw new InvalidOperationException("Clipboard is busy. Please try copying again.");
             try
             {
                 if (!EmptyClipboard()) throw new InvalidOperationException("Could not clear the clipboard.");
@@ -54,16 +54,16 @@ static class SecureClipboard
     {
         lock (gate)
         {
-            if (owner == null || ownership.Sequence == 0) return;
+            if (owner == IntPtr.Zero || ownership.Sequence == 0) return;
             deadline = 0;
-            if (!ownership.Matches(GetClipboardSequenceNumber()) || GetClipboardOwner() != owner.Handle)
+            if (!ownership.Matches(GetClipboardSequenceNumber()) || GetClipboardOwner() != owner)
             {
                 ownership.Forget(); clearTimer?.Dispose(); clearTimer = null; return;
             }
-            if (!OpenClipboard(owner.Handle)) { clearTimer?.Change(1_000, 1_000); return; }
+            if (!OpenClipboard(owner)) { clearTimer?.Change(1_000, 1_000); return; }
             try
             {
-                if (ownership.Matches(GetClipboardSequenceNumber()) && GetClipboardOwner() == owner.Handle && !EmptyClipboard())
+                if (ownership.Matches(GetClipboardSequenceNumber()) && GetClipboardOwner() == owner && !EmptyClipboard())
                 { clearTimer?.Change(1_000, 1_000); return; }
                 ownership.Forget(); clearTimer?.Dispose(); clearTimer = null;
             }
@@ -71,10 +71,11 @@ static class SecureClipboard
         }
     }
 
-    static NativeWindow CreateOwner()
+    static IntPtr CreateOwner()
     {
-        var window = new NativeWindow();
-        window.CreateHandle(new CreateParams { Parent = new IntPtr(-3) });
+        IntPtr window = CreateWindowEx(0, "STATIC", "BwPicker clipboard", 0, 0, 0, 0, 0, new IntPtr(-3) /* HWND_MESSAGE */,
+            IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        if (window == IntPtr.Zero) throw new InvalidOperationException("Could not prepare the clipboard.");
         return window;
     }
     static uint Register(string name)
@@ -131,6 +132,9 @@ static class SecureClipboard
         GlobalFree(block);
     }
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr CreateWindowEx(int exStyle, string className, string windowName, int style, int x, int y, int width, int height,
+        IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
     [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr owner);
     [DllImport("user32.dll")] static extern bool CloseClipboard();
     [DllImport("user32.dll")] static extern bool EmptyClipboard();

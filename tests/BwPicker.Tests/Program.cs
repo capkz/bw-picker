@@ -19,9 +19,6 @@ static class Tests
 
     [STAThread] static int Main(string[] args)
     {
-        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
         try
         {
             if (args.Contains("--verify-cli"))
@@ -37,7 +34,6 @@ static class Tests
             AccountChecks().GetAwaiter().GetResult();
             LocalVaultChecks().GetAwaiter().GetResult();
             UpdateChecks();
-            LayoutChecks();
             Console.WriteLine("PASS: all regression checks.");
             return 0;
         }
@@ -466,55 +462,5 @@ static class Tests
         }
         public void Wait(int milliseconds) { }
         public uint Send(Native.INPUT[] inputs) { Sends++; AfterSend?.Invoke(); return Blocked ? 0u : (uint)inputs.Length; }
-    }
-
-    static void LayoutChecks()
-    {
-        Theme.ForceDark = true;
-        var client = BwClient.Preview(Enumerable.Range(0, 1000).Select(i =>
-            new Entry(i.ToString(), "A long example login " + i, "user@example.com", ["https://example.com"])));
-        var target = new WindowContext(IntPtr.Zero, "", "Microsoft Edge", "");
-        using var picker = new PickerForm(client, target, (_, _) => { }) { CloseOnDeactivate = false };
-        using var unlock = new UnlockForm(new BwClient(), new BwStatus("locked", "you@example.com", "https://vault.example.com"));
-        foreach (var form in new Form[] { picker, unlock })
-        {
-            form.Show(); Application.DoEvents();
-            foreach (int dpi in new[] { 96, 120, 144, 192, 96 })
-            {
-                var rect = new Rect { Left = form.Left, Top = form.Top, Right = form.Right, Bottom = form.Bottom };
-                IntPtr ptr = Marshal.AllocHGlobal(Marshal.SizeOf<Rect>());
-                try { Marshal.StructureToPtr(rect, ptr, false); SendMessage(form.Handle, 0x02E0, new IntPtr(dpi | dpi << 16), ptr); }
-                finally { Marshal.FreeHGlobal(ptr); }
-                Application.DoEvents();
-                Assert(form.DeviceDpi == dpi, "DPI transition did not apply");
-                int S(int n) => (int)Math.Round(n * dpi / 96f);
-                var textbox = form.Controls.OfType<TextBox>().Single();
-                Assert(textbox.Font.Unit == GraphicsUnit.Pixel && Math.Abs(textbox.Font.Size - 11 * dpi / 72f) < .1f, "Text and layout scale diverged");
-                var field = form is UnlockForm
-                    ? new Rectangle(S(24), S(150), form.Width - S(48), S(40))
-                    : new Rectangle(S(20), S(64), form.Width - S(40), S(40));
-                Assert(field.Contains(textbox.Bounds), $"Text box escaped field at {dpi} DPI");
-                foreach (Control control in form.Controls) Assert(form.ClientRectangle.Contains(control.Bounds), "Control outside window");
-                if (form is PickerForm)
-                {
-                    var results = form.Controls.OfType<ResultList>().Single();
-                    Assert(results.RowHeight == S(56) && results.Count == 1000, "Result DPI or count incorrect");
-                    using var nameFont = Theme.Semibold(10.5f, dpi);
-                    Assert(TextRenderer.MeasureText("Example", nameFont).Height <= S(22), "Login title clips its row");
-                    results.MoveSelection(999);
-                    Assert(results.SelectedEntry?.Id != "0", "Navigation failed");
-                }
-                using var bmp = new Bitmap(form.Width, form.Height);
-                form.DrawToBitmap(bmp, new Rectangle(Point.Empty, form.Size));
-                Directory.CreateDirectory("bin/previews");
-                bmp.Save($"bin/previews/{form.GetType().Name}-{dpi}.png");
-            }
-            form.Hide();
-        }
-        Console.WriteLine("PASS: both popup layouts at 100%, 125%, 150%, 200%, then back to 100%; font, field and list bounds verified.");
-        var perf = Stopwatch.StartNew();
-        using var warm = new PickerForm(client, target, (_, _) => { }) { CloseOnDeactivate = false };
-        warm.Show(); Application.DoEvents();
-        Console.WriteLine($"Warm picker with 1,000 sample entries: {perf.ElapsedMilliseconds} ms to show.");
     }
 }

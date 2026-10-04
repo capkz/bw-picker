@@ -1,3 +1,11 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Media.Imaging;
+using Avalonia.Styling;
+using Avalonia.Themes.Fluent;
+using Avalonia.Threading;
+
 namespace BwPicker;
 
 static partial class Program
@@ -10,14 +18,10 @@ static partial class Program
     {
         if (args.Contains("--preview"))
         {
-            ApplicationConfiguration.Initialize();
-            if (args.Contains("--dark")) Theme.ForceDark = true;
-            if (args.Contains("--light")) Theme.ForceDark = false;
-            string? snapshot = args.SkipWhile(a => a != "--snapshot").Skip(1).FirstOrDefault();
-            if (args.Contains("--settings")) ShowSettingsPreview(snapshot);
-            else if (args.Contains("--clisetup")) Run(() => new CliSetupForm(), snapshot);
-            else if (args.Contains("--signin")) Run(() => new SignInForm(BwClient.Preview([]), "vault.example.com", "you@example.com"), snapshot);
-            else ShowPreview(args.Contains("--unlock"), snapshot, args.SkipWhile(a => a != "--query").Skip(1).FirstOrDefault());
+            if (args.Contains("--dark")) Palette.ForceDark = true;
+            if (args.Contains("--light")) Palette.ForceDark = false;
+            App.Startup = () => Preview(args);
+            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
             return;
         }
 
@@ -33,71 +37,85 @@ static partial class Program
             Startup.Refresh();
         }
         catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException) { }
-        ApplicationConfiguration.Initialize();
+
         BwClient? client = null;
         CreateClient(args, ref client);
-        Application.Run(new TrayApp(client));
+        TrayController? tray = null;
+        App.Startup = () => tray = new TrayController(App.Shutdown, client);
+        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
+        tray?.Dispose();
     }
 
-    static void ShowSettingsPreview(string? snapshot)
+    public static AppBuilder BuildAvaloniaApp() => AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace();
+
+    // --preview [--dark|--light] [--unlock|--signin|--settings|--clisetup] [--query text] [--snapshot file.png]
+    static void Preview(string[] args)
     {
-        var settings = new AppSettings { LastUpdateCheck = DateTimeOffset.Now.AddHours(-3) };
+        string? snapshot = args.SkipWhile(a => a != "--snapshot").Skip(1).FirstOrDefault();
+        string? query = args.SkipWhile(a => a != "--query").Skip(1).FirstOrDefault();
         var status = new BwStatus("locked", "you@example.com", "https://vault.example.com");
-        Run(() => new SettingsForm(BwClient.Preview([]), settings, new Updater(settings), (_, _) => { }, status), snapshot);
-    }
-
-    static void ShowPreview(bool unlock, string? snapshot, string? query)
-    {
-        if (unlock)
+        PanelWindow window;
+        if (args.Contains("--unlock")) window = new UnlockWindow(BwClient.Preview([]), status);
+        else if (args.Contains("--signin")) window = new SignInWindow(BwClient.Preview([]), "vault.example.com", "you@example.com");
+        else if (args.Contains("--clisetup")) window = new CliSetupWindow();
+        else if (args.Contains("--settings"))
         {
-            Run(() => new UnlockForm(BwClient.Preview([]), new BwStatus("locked", "you@example.com", "https://vault.example.com")), snapshot);
-            return;
+            var settings = new AppSettings { LastUpdateCheck = DateTimeOffset.Now.AddHours(-3) };
+            window = new SettingsWindow(BwClient.Preview([]), settings, new Updater(settings), (_, _) => { }, status);
         }
-        var bw = BwClient.Preview(
-        [
-            new("1", "Discord", "you@example.com", ["https://discord.com"]),
-            new("2", "Discord (alt)", "alt@example.com", ["discord.com"]),
-            new("3", "GitHub", "octocat", ["https://github.com/login"]),
-            new("4", "Steam", "gamer_42", ["https://store.steampowered.com"]),
-            new("5", "Proxmox", "root", ["https://pve.example.com:8006"]),
-            new("6", "Home Assistant", "admin", ["https://ha.example.com"]),
-            new("7", "Battle.net", "you@example.com", ["https://battle.net"]),
-            new("8", "Wi-Fi router", null, ["http://192.168.0.1"]),
-        ]);
-        var target = new WindowContext(IntPtr.Zero, "discord", "Discord", "Friends - Discord");
-        Run(() =>
+        else
         {
-            var picker = new PickerForm(bw, target, (_, _) => { }) { CloseOnDeactivate = false };
-            if (query != null) picker.Controls.OfType<TextBox>().Single().Text = query == "*" ? "" : query;
-            return picker;
-        }, snapshot);
+            var bw = BwClient.Preview(
+            [
+                new("1", "Discord", "you@example.com", ["https://discord.com"]),
+                new("2", "Discord (alt)", "alt@example.com", ["discord.com"]),
+                new("3", "GitHub", "octocat", ["https://github.com/login"]),
+                new("4", "Steam", "gamer_42", ["https://store.steampowered.com"]),
+                new("5", "Proxmox", "root", ["https://pve.example.com:8006"]),
+                new("6", "Home Assistant", "admin", ["https://ha.example.com"]),
+                new("7", "Battle.net", "you@example.com", ["https://battle.net"]),
+                new("8", "Wi-Fi router", null, ["http://192.168.0.1"]),
+            ]);
+            var picker = new PickerWindow(bw, new WindowContext(IntPtr.Zero, "discord", "Discord", "Friends - Discord"), (_, _) => { })
+                { CloseOnDeactivate = false };
+            if (query != null) picker.Query = query == "*" ? "" : query;
+            window = picker;
+        }
+        window.Closed += (_, _) => App.Shutdown();
+        if (snapshot != null)
+        {
+            window.Opened += async (_, _) =>
+            {
+                await Task.Delay(500);
+                var size = new PixelSize((int)(window.Bounds.Width * window.RenderScaling), (int)(window.Bounds.Height * window.RenderScaling));
+                using var bitmap = new RenderTargetBitmap(size, new Vector(96 * window.RenderScaling, 96 * window.RenderScaling));
+                bitmap.Render(window);
+                using (var file = File.Create(snapshot)) bitmap.Save(file, new PngBitmapEncoderOptions());
+                window.Close();
+            };
+        }
+        window.Show();
+    }
+}
+
+sealed class App : Application
+{
+    public static Action? Startup { get; set; }
+
+    public static void Shutdown() =>
+        Dispatcher.UIThread.Post(() => (Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown());
+
+    public override void Initialize()
+    {
+        Styles.Add(new FluentTheme());
+        RequestedThemeVariant = ThemeVariant.Default; // follow the OS light/dark setting
+        Ui.ApplyAccent(this);
+        Name = "BwPicker";
     }
 
-    // With a snapshot path, renders the window to a PNG and exits instead of staying open.
-    static void Run(Func<Form> createForm, string? snapshot)
+    public override void OnFrameworkInitializationCompleted()
     {
-        // Match the tray app: create the popup after the message loop has started.
-        using var context = new ApplicationContext();
-        using var timer = new System.Windows.Forms.Timer { Interval = 100 };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            var form = createForm();
-            form.FormClosed += (_, _) => { form.Dispose(); context.ExitThread(); };
-            if (snapshot != null)
-            {
-                form.Shown += async (_, _) =>
-                {
-                    await Task.Delay(300);
-                    using var bmp = new Bitmap(form.Width, form.Height);
-                    form.DrawToBitmap(bmp, new Rectangle(Point.Empty, form.Size));
-                    bmp.Save(snapshot);
-                    form.Close();
-                };
-            }
-            form.Show();
-        };
-        timer.Start();
-        Application.Run(context);
+        Startup?.Invoke();
+        base.OnFrameworkInitializationCompleted();
     }
 }
