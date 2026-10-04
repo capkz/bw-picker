@@ -8,8 +8,6 @@ namespace BwPicker.Regression;
 
 static class Tests
 {
-    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam);
-    [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
     static void Assert(bool condition, string message) { if (!condition) throw new Exception(message); }
     static async Task Throws(Func<Task> action)
     {
@@ -26,7 +24,9 @@ static class Tests
                 using var executable = TrustedCli.Open();
                 using var live = new BwClient();
                 live.Status().GetAwaiter().GetResult();
-                Console.WriteLine("PASS: official Bitwarden signature, publisher, file handle and sanitized status execution.");
+                Console.WriteLine(OperatingSystem.IsWindows()
+                    ? "PASS: official Bitwarden signature, publisher, file handle and sanitized status execution."
+                    : "PASS: CLI ownership/permission checks, file handle and sanitized status execution.");
                 return 0;
             }
             ClientChecks().GetAwaiter().GetResult();
@@ -225,10 +225,13 @@ static class Tests
             {"tag_name":"{{tag}}","draft":false,"prerelease":{{(prerelease ? "true" : "false")}},
              "html_url":"https://github.com/capkz/bw-picker/releases/tag/{{tag}}",
              "assets":[{"name":"BwPicker-win-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-win-x64.zip"},
+                       {"name":"BwPicker-linux-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-linux-x64.zip"},
                        {"name":"SHA256SUMS.txt","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/SHA256SUMS.txt"}]}
             """;
         var current = new Version(1, 2, 0);
         Assert(Updater.ParseRelease(Release("v1.3.0"), current)?.Version == new Version(1, 3, 0), "Newer release not offered");
+        Assert(Updater.ParseRelease(Release("v1.3.0"), current)?.Package.AbsolutePath.EndsWith("/" + Updater.PackageName) == true,
+            "Another platform's package offered");
         Assert(Updater.ParseRelease(Release("v1.2.0"), current) == null, "Same version offered as an update");
         Assert(Updater.ParseRelease(Release("v1.1.9"), current) == null, "Older version offered as an update");
         Assert(Updater.ParseRelease(Release("v2.0.0", prerelease: true), current) == null, "Prerelease offered");
@@ -244,11 +247,17 @@ static class Tests
         try { Updater.ParseChecksum($"{hash}  other.zip", "BwPicker-win-x64.zip"); } catch (InvalidOperationException) { rejected = true; }
         Assert(rejected, "Missing checksum accepted");
 
-        // Update packages may only place exe/DLL files directly in the app folder.
-        foreach (string ok in new[] { "BwPicker.exe", "libSkiaSharp.dll", "av_libglesv2.dll" })
-            Assert(Updater.IsAppFile(ok), $"{ok} not accepted from an update package");
-        foreach (string bad in new[] { "../evil.dll", "sub/evil.dll", "sub\\evil.dll", "C:evil.exe", "README.md", "Install-Admin.ps1", ".hidden.dll", "" })
-            Assert(!Updater.IsAppFile(bad), $"'{bad}' accepted from an update package");
+        // Update packages may only place the executable and native libraries directly in the app folder.
+#if WINDOWS
+        string[] accepted = ["BwPicker.exe", "libSkiaSharp.dll", "av_libglesv2.dll"];
+        string[] refused = ["../evil.dll", "sub/evil.dll", "sub\\evil.dll", "C:evil.exe", "README.md", "Install-Admin.ps1", ".hidden.dll", ""];
+#else
+        string[] accepted = ["BwPicker", "libSkiaSharp.so", "libHarfBuzzSharp.so"];
+        string[] refused = ["../evil.so", "sub/evil.so", "sub\\evil.so", "BwPicker.exe", "evil", "README.md", ".hidden.so", "BwPicker.sh", ""];
+#endif
+        foreach (string ok in accepted) Assert(Updater.IsAppFile(ok), $"{ok} not accepted from an update package");
+        foreach (string bad in refused) Assert(!Updater.IsAppFile(bad), $"'{bad}' accepted from an update package");
+#if WINDOWS
         // Admin autostart is only allowed from folders that need admin rights to change.
         string pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         Assert(Startup.InProtectedFolder(Path.Combine(pf, "BwPicker", "BwPicker.exe")), "Program Files not treated as protected");
@@ -256,6 +265,7 @@ static class Tests
         Assert(!Startup.InProtectedFolder(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "BwPicker", "BwPicker.exe")),
             "User-writable folder treated as protected");
         Assert(!Startup.InProtectedFolder(Path.Combine(pf, "..", "Users", "x.exe")), "Path traversal out of Program Files accepted");
+#endif
         Console.WriteLine("PASS: release version/prerelease/origin checks and checksum parsing; admin-autostart folder check.");
     }
 
@@ -349,14 +359,27 @@ static class Tests
             secret.Dispose(); Assert(encrypted.All(b => b == 0), "Encrypted secret was not wiped");
             await Throws(() => { secret.Reveal(); return Task.CompletedTask; });
         }
+#if WINDOWS
         var ownership = new ClipboardOwnership();
         ownership.Mark(12); Assert(ownership.Matches(12) && !ownership.Matches(13), "Clipboard ownership mismatch");
         ownership.Forget(); Assert(!ownership.Matches(12), "Clipboard ownership survived clearing");
-        var psi = CliEnvironment.Create("C:/verified/bw.exe", ["unlock", "--passwordenv", "BWPICKER_PW", "--raw"]);
+#endif
+        var psi = CliEnvironment.Create("/verified/bw", ["unlock", "--passwordenv", "BWPICKER_PW", "--raw"]);
         Assert(!psi.UseShellExecute && !psi.Environment.ContainsKey("BW_SESSION") && !psi.Environment.ContainsKey("NODE_OPTIONS") &&
             psi.Environment["NODE_TLS_REJECT_UNAUTHORIZED"] == "1", "CLI environment permits inherited secrets or code injection");
         Assert(!psi.ArgumentList.Any(a => a.Contains("test-password")), "Password appears in command line");
+#if WINDOWS
         await Throws(() => { TrustedCli.Verify(Environment.ProcessPath!); return Task.CompletedTask; });
+#else
+        // Executables reachable through folders other users can write to (like /tmp) aren't run.
+        string planted = Path.Combine("/tmp", $"bw-test-{Environment.ProcessId}");
+        File.WriteAllText(planted, "#!/bin/sh\n");
+        File.SetUnixFileMode(planted, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try { Assert(!TrustedCli.Trusted(planted, isFile: true), "CLI in a world-writable folder trusted"); }
+        finally { File.Delete(planted); }
+        Assert(TrustedCli.Trusted("/usr/bin/env", isFile: true), "Root-owned system executable not trusted");
+        Assert(!TrustedCli.Trusted("/usr/bin", isFile: true), "A folder accepted as the CLI executable");
+#endif
         foreach (string server in new[] { "http://example.com", "https://user:password@example.com", "not-a-url" })
             await Throws(() => { BwClient.ValidateServer(server); return Task.CompletedTask; });
         BwClient.ValidateServer("https://vault.example.com");
@@ -467,6 +490,6 @@ static class Tests
             return Field != IntPtr.Zero && FieldRoot == window;
         }
         public void Wait(int milliseconds) { }
-        public uint Send(Native.INPUT[] inputs) { Sends++; AfterSend?.Invoke(); return Blocked ? 0u : (uint)inputs.Length; }
+        public bool Press(KeyStroke key) { Sends++; AfterSend?.Invoke(); return !Blocked; }
     }
 }

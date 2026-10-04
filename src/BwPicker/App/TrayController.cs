@@ -1,13 +1,10 @@
 using Avalonia.Threading;
-using Microsoft.Win32;
 
 namespace BwPicker;
 
 /// <summary>The tray icon, global hotkey, auto-lock and update checks; owns the vault client.</summary>
 sealed class TrayController : IDisposable
 {
-    const uint HotkeyModifiers = Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT;
-    const uint HotkeyKey = 0x42; // B
     const string HotkeyLabel = "Ctrl+Alt+B";
     static readonly TimeSpan AutoLockAfter = TimeSpan.FromMinutes(15);
 
@@ -16,6 +13,7 @@ sealed class TrayController : IDisposable
     readonly Updater updater;
     readonly NativeTray tray;
     readonly GlobalHotkey hotkey;
+    readonly SessionMonitor session = new();
     readonly DispatcherTimer lockTimer, updateTimer;
     readonly Action shutdownApp;
     SettingsWindow? settingsWindow;
@@ -44,9 +42,9 @@ sealed class TrayController : IDisposable
         ]);
         tray.Clicked += ShowSettings;
 
-        hotkey = new GlobalHotkey(HotkeyModifiers, HotkeyKey);
+        hotkey = new GlobalHotkey();
         hotkey.Pressed += () => Dispatcher.UIThread.Post(() => _ = OnHotkey());
-        if (!hotkey.Registered) Notify($"{HotkeyLabel} is already used by another app.", Notice.Warning);
+        if (!hotkey.Registered) Notify(hotkey.Problem ?? $"{HotkeyLabel} is already used by another app.", Notice.Warning);
 
         lockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         lockTimer.Tick += async (_, _) =>
@@ -55,8 +53,10 @@ sealed class TrayController : IDisposable
         };
         lockTimer.Start();
 
-        SystemEvents.SessionSwitch += OnSessionSwitch;
-        SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        session.Locked += async () => { sessionLocked = true; await BlockAccess(); };
+        session.Unlocked += () => { sessionLocked = false; if (!suspended) bw.AllowInteraction(); };
+        session.Suspending += async () => { suspended = true; await BlockAccess(); };
+        session.Resumed += () => { suspended = false; if (!sessionLocked) bw.AllowInteraction(); };
         _ = WarmStatus();
 
         // First check shortly after startup, then hourly to see whether the daily check is due.
@@ -78,6 +78,7 @@ sealed class TrayController : IDisposable
             Notify(Startup.AdminMode ? "BwPicker is now running as administrator." : "BwPicker is now running without administrator rights.", Notice.Info);
             Dispatcher.UIThread.Post(ShowSettings, DispatcherPriority.Background);
         }
+#if WINDOWS
         // "Run as administrator" is on by default: a release build that isn't elevated yet asks once (UAC).
         else if (settings.RunAsAdmin && !Startup.AdminMode && !AppVersion.IsDevelopment)
         {
@@ -87,6 +88,7 @@ sealed class TrayController : IDisposable
             askLater.Tick += (_, _) => { askLater.Stop(); SetAdmin(true); };
             askLater.Start();
         }
+#endif
 
         if (!settings.Welcomed)
         {
@@ -100,11 +102,16 @@ sealed class TrayController : IDisposable
     {
         if (shuttingDown) return;
         if (settingsWindow != null) { settingsWindow.Activate(); return; }
+#if WINDOWS
         settingsWindow = new SettingsWindow(bw, settings, updater, Notify, setAdmin: SetAdmin);
+#else
+        settingsWindow = new SettingsWindow(bw, settings, updater, Notify);
+#endif
         settingsWindow.Closed += (_, _) => settingsWindow = null;
         settingsWindow.Show();
     }
 
+#if WINDOWS
     /// <summary>Switches administrator mode; on success this instance exits and the switched copy takes over.</summary>
     void SetAdmin(bool enable)
     {
@@ -137,6 +144,7 @@ sealed class TrayController : IDisposable
             settingsWindow?.RefreshAdmin();
         }
     }
+#endif
 
     void AnnounceUpdate(bool manual)
     {
@@ -174,7 +182,7 @@ sealed class TrayController : IDisposable
         busy = true;
         try
         {
-            var target = WindowContext.From(Native.GetForegroundWindow());
+            var target = WindowContext.FromForeground();
             bool needsUnlock = !bw.Unlocked;
             if (needsUnlock && !await Unlock()) return;
             lastUsed = Environment.TickCount64;
@@ -234,28 +242,6 @@ sealed class TrayController : IDisposable
         catch (InvalidOperationException ex) { Notify(ex.Message, Notice.Warning); return false; }
     }
 
-    async void OnSessionSwitch(object? sender, SessionSwitchEventArgs e)
-    {
-        if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.SessionLogoff or
-            SessionSwitchReason.ConsoleDisconnect or SessionSwitchReason.RemoteDisconnect)
-        {
-            sessionLocked = true;
-            await BlockAccess();
-        }
-        else if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.SessionLogon or
-            SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect)
-        {
-            sessionLocked = false;
-            if (!suspended) bw.AllowInteraction();
-        }
-    }
-
-    async void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
-    {
-        if (e.Mode == PowerModes.Suspend) { suspended = true; await BlockAccess(); }
-        else if (e.Mode == PowerModes.Resume) { suspended = false; if (!sessionLocked) bw.AllowInteraction(); }
-    }
-
     async Task BlockAccess()
     {
         try { var task = bw.Block(); SecureClipboard.ClearOwned(); await task; }
@@ -266,8 +252,7 @@ sealed class TrayController : IDisposable
     {
         if (shuttingDown) return;
         shuttingDown = true;
-        SystemEvents.SessionSwitch -= OnSessionSwitch;
-        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        session.Dispose();
         lockTimer.Stop();
         updateTimer.Stop();
         settingsWindow?.Close();
@@ -288,8 +273,7 @@ sealed class TrayController : IDisposable
     public void Dispose()
     {
         shuttingDown = true;
-        SystemEvents.SessionSwitch -= OnSessionSwitch;
-        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        session.Dispose();
         bw.Dispose();
         SecureClipboard.ClearOwned();
         hotkey.Dispose();

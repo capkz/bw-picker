@@ -24,7 +24,10 @@ sealed record ReleaseInfo(Version Version, string Tag, Uri Page, Uri Package, Ur
 sealed class Updater(AppSettings settings, HttpClient? http = null)
 {
     internal const string Repository = "capkz/bw-picker";
-    internal const string PackageName = "BwPicker-win-x64.zip";
+    /// <summary>This platform's release package, e.g. BwPicker-win-x64.zip or BwPicker-linux-x64.zip.</summary>
+    internal static readonly string PackageName = OperatingSystem.IsWindows() ? "BwPicker-win-x64.zip"
+        : $"BwPicker-linux-{(System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64")}.zip";
+    internal static readonly string ExeName = OperatingSystem.IsWindows() ? "BwPicker.exe" : "BwPicker";
     const string ChecksumsName = "SHA256SUMS.txt";
     const long MaxPackageBytes = 300 * 1024 * 1024; // self-contained single-file build
     static readonly TimeSpan CheckInterval = TimeSpan.FromHours(24);
@@ -164,7 +167,7 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
         if (!CryptographicOperations.FixedTimeEquals(actual, expected))
             throw new InvalidOperationException("The download doesn't match the release checksum, so it wasn't installed.");
 
-        // The app is BwPicker.exe plus the native libraries next to it; take only those, from the zip's root.
+        // The app is the executable plus the native libraries next to it; take only those, from the zip's root.
         string payload = Path.Combine(folder, "app");
         Directory.CreateDirectory(payload);
         long extracted = 0;
@@ -178,18 +181,48 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
                 entry.ExtractToFile(Path.Combine(payload, entry.Name), overwrite: true);
             }
         }
-        string exe = Path.Combine(payload, "BwPicker.exe");
-        if (!File.Exists(exe)) throw new InvalidOperationException("The release package has no BwPicker.exe.");
-        var info = FileVersionInfo.GetVersionInfo(exe);
-        if (info.ProductVersion?.Split('+')[0] != release.Version.ToString(3))
+        string exe = Path.Combine(payload, ExeName);
+        if (!File.Exists(exe)) throw new InvalidOperationException($"The release package has no {ExeName}.");
+        if (await ReadVersion(exe, cancel) != release.Version.ToString(3))
             throw new InvalidOperationException("The downloaded app reports a different version than the release.");
         return payload;
     }
 
-    /// <summary>An exe or DLL at the zip's root (no folders, so nothing can be written outside the app folder).</summary>
+    /// <summary>The version a downloaded (and checksum-verified) executable reports.</summary>
+    static async Task<string?> ReadVersion(string exe, CancellationToken cancel)
+    {
+        if (OperatingSystem.IsWindows()) return FileVersionInfo.GetVersionInfo(exe).ProductVersion?.Split('+')[0];
+        File.SetUnixFileMode(exe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        // ELF files carry no version resource; the new build prints its version and exits before loading any UI.
+        using var process = Process.Start(new ProcessStartInfo(exe)
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, ArgumentList = { "--version" },
+        }) ?? throw new InvalidOperationException("Couldn't check the downloaded app.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            string output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
+            await process.WaitForExitAsync(timeout.Token);
+            return process.ExitCode == 0 ? output.Trim() : null;
+        }
+        catch (OperationCanceledException)
+        {
+            try { process.Kill(); } catch (InvalidOperationException) { }
+            throw new InvalidOperationException("The downloaded app didn't respond.");
+        }
+    }
+
+    /// <summary>
+    /// The executable or a native library at the zip's root (no folders, so nothing can be written outside the app
+    /// folder): .exe/.dll on Windows, BwPicker and *.so on Linux.
+    /// </summary>
     internal static bool IsAppFile(string entryName) =>
         entryName.Length > 0 && entryName.IndexOfAny(['/', '\\', ':']) < 0 && !entryName.StartsWith('.') &&
-        (entryName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase));
+        (OperatingSystem.IsWindows()
+            ? entryName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            : entryName == ExeName || entryName.EndsWith(".so", StringComparison.Ordinal));
 
     void SetState(bool working, string status)
     {
@@ -222,7 +255,7 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
         string current = Environment.ProcessPath ?? throw new InvalidOperationException("Can't locate the running app.");
         string folder = Path.GetDirectoryName(current)!;
         var files = Directory.GetFiles(payloadFolder).Select(Path.GetFileName).OfType<string>().Where(IsAppFile).ToList();
-        if (!files.Contains("BwPicker.exe", StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException("The update has no BwPicker.exe.");
+        if (!files.Contains(ExeName, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException($"The update has no {ExeName}.");
 
         var moved = new List<string>();
         var copied = new List<string>();
@@ -243,8 +276,8 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
             foreach (string target in copied) { try { File.Delete(target); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
             foreach (string target in moved) { try { File.Move(target + ".old", target, overwrite: true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
             if (e is UnauthorizedAccessException)
-                throw new InvalidOperationException($"BwPicker can't replace itself in {folder}. " +
-                    "Move it to a folder you can write to, such as %LOCALAPPDATA%\\Programs\\BwPicker, or update manually.");
+                throw new InvalidOperationException($"BwPicker can't replace itself in {folder}. Move it to a folder you can write to, such as " +
+                    (OperatingSystem.IsWindows() ? "%LOCALAPPDATA%\\Programs\\BwPicker" : "~/.local/share/BwPicker") + ", or update manually.");
             throw;
         }
     }

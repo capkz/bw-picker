@@ -6,11 +6,11 @@
 [![Downloads](https://img.shields.io/github/downloads/capkz/bw-picker/total?label=downloads)](https://github.com/capkz/bw-picker/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/capkz/bw-picker/build.yml?branch=main&label=build)](https://github.com/capkz/bw-picker/actions/workflows/build.yml)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
-[![Windows 10/11](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4)](#requirements)
+[![Windows 10/11 | Linux](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20%7C%20Linux-0078D4)](#requirements)
 
-**Bitwarden auto-type and autofill for Windows desktop apps.**
+**Bitwarden auto-type and autofill for desktop apps on Windows and Linux.**
 
-A keyboard-driven picker that types your Bitwarden logins into **any Windows app**, not just the browser. Press a hotkey over a desktop app's login screen (a game launcher, Discord, a VPN client…), search, and press Enter.
+A keyboard-driven picker that types your Bitwarden logins into **any desktop app**, not just the browser. Press a hotkey over a desktop app's login screen (a game launcher, Discord, a VPN client…), search, and press Enter.
 
 > **Unofficial.** BwPicker is an independent project and is not affiliated with, endorsed by, or supported by Bitwarden Inc. It uses the official, signed [Bitwarden CLI](https://bitwarden.com/help/cli/) for all vault access.
 
@@ -28,11 +28,11 @@ The Bitwarden browser extension only fills web pages. The desktop app's Autotype
 - **Ranks logins for that app** by its process name and window title (Discord → logins named or hosted at "discord"). No URI tagging needed.
 - **Two-step logins**: type the username and password together, or each on its own for sign-ins that ask for them on separate pages.
 - **Copy** the username or password instead, kept out of Windows clipboard history and cleared after 30 seconds.
-- **Settings window**: start with Windows, choose bitwarden.com, bitwarden.eu or your self-hosted server (including Vaultwarden), and sign in or out. No terminal needed.
+- **Settings window**: start at sign-in, choose bitwarden.com, bitwarden.eu or your self-hosted server (including Vaultwarden), and sign in or out. No terminal needed.
 - **Sign in** with email, master password and a two-step code (authenticator, email or YubiKey), or with a personal API key.
 - **Updates itself** from GitHub Releases after checking the download's SHA-256 checksum. Checks daily; you can turn it off.
-- **Follows Windows** light/dark mode.
-- **Locks automatically** after 15 minutes idle, and immediately when Windows locks, sleeps or signs out.
+- **Follows the system** light/dark mode.
+- **Locks automatically** after 15 minutes idle, and immediately when the screen locks, the computer sleeps or you sign out.
 
 | Key | Action |
 |---|---|
@@ -46,9 +46,9 @@ The Bitwarden browser extension only fills web pages. The desktop app's Autotype
 
 ## Requirements
 
-- Windows 10 or 11
+- Windows 10 or 11, or a 64-bit Linux desktop (see [Linux](#linux) for what works where)
 - Nothing else for the release build (it includes its own .NET runtime); the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to build from source
-- The official Bitwarden CLI. BwPicker refuses to run a `bw.exe` that isn't signed by Bitwarden Inc.
+- The official Bitwarden CLI. If it's missing, BwPicker offers to install it (with winget on Windows, from Bitwarden's GitHub releases on Linux). On Windows it refuses to run a `bw.exe` that isn't signed by Bitwarden Inc.
 
 ```powershell
 winget install Bitwarden.CLI
@@ -56,9 +56,9 @@ winget install Bitwarden.CLI
 
 ## Setup
 
-1. Start BwPicker. It sits in the system tray; double-click the icon to open **Settings**.
+1. Start BwPicker. It sits in the system tray; click the icon to open **Settings**.
 2. Under **Account**, choose your server (bitwarden.com, bitwarden.eu or self-hosted) and sign in.
-3. Turn on **Start with Windows** if you want it running all the time.
+3. Turn on **Start with Windows** (**Start at sign-in** on Linux) if you want it running all the time.
 4. Click into an app's login field and press `Ctrl+Alt+B`. After the vault auto-locks, it asks for your master password again.
 
 <p align="center"><img src="docs/settings.png" width="420" alt="BwPicker settings: start with Windows, server and account, updates"></p>
@@ -84,6 +84,21 @@ dotnet build BwPicker.sln -c Release
 
 Builds from source report version `0.0.0-dev` and never update themselves.
 
+### Linux
+
+Download `BwPicker-linux-x64.zip`, unzip it and run the installer, which puts BwPicker in `~/.local/share/BwPicker` (so it can update itself), adds it to the applications menu and starts it:
+
+```sh
+unzip BwPicker-linux-x64.zip -d BwPicker && cd BwPicker
+sh install-linux.sh
+```
+
+- **X11** (Xfce, MATE, Cinnamon, KDE or GNOME on Xorg): everything works as on Windows. Copying needs `xclip`; typing needs `libxtst6` (both are installed on most desktops).
+- **Wayland**: apps can't listen for a global hotkey or type into other apps there. Add a keyboard shortcut in your desktop's settings (e.g. `Ctrl+Alt+B`) that runs `~/.local/share/BwPicker/BwPicker --pick`; the picker then opens and copies with `Ctrl+U` / `Ctrl+P` (needs `wl-clipboard`).
+- The tray icon uses the StatusNotifierItem standard: built into KDE, Xfce and Cinnamon; GNOME needs the AppIndicator extension (included in Ubuntu).
+
+To build from source on Linux: `dotnet build BwPicker.sln -c Release -p:TargetOS=linux`.
+
 ### Apps that run as administrator
 
 Windows doesn't let a normal app type into an app running as administrator (some game launchers do), so BwPicker tells you to use `Ctrl+U` / `Ctrl+P` and paste instead. To have it type there too, install it with the included script:
@@ -108,7 +123,7 @@ Read [SECURITY.md](SECURITY.md) before relying on this with important accounts. 
 What it **cannot** protect against:
 
 - **It can't verify where it's typing.** It checks the window, process and title, not a web page's real origin. If you pick a login while a fake window is in front, it will type into that window. You choosing the login is the safeguard.
-- Malware already running as your Windows user, keyloggers, or a compromised destination app.
+- Malware already running as your user, keyloggers, or a compromised destination app. On X11 any app you run can read keystrokes and the clipboard, so this matters more there.
 - A compromised GitHub account publishing a malicious release. Turn off update checks and build from source if that matters to you.
 - Antivirus heuristics: a global hotkey plus simulated typing looks like a keylogger, so some products may flag it.
 
@@ -125,6 +140,8 @@ src/BwPicker/
   Updates/   GitHub release check and self-update
 tests/BwPicker.Tests/   regression checks with a fake CLI
 ```
+
+Platform services (hotkey, typing, clipboard, tray, autostart) live in `*.Windows.cs` and `*.Linux.cs` files; the Linux build is selected with `-p:TargetOS=linux` or `-r linux-x64`.
 
 ```powershell
 dotnet build BwPicker.sln -c Release

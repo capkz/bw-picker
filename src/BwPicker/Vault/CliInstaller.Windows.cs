@@ -17,6 +17,11 @@ static class CliInstaller
 
     public static bool CanInstall => Winget() != null;
 
+    /// <summary>How the install happens, for the setup window.</summary>
+    public const string Method = "with winget";
+
+    public const string Unavailable = "winget isn't available here, so install the CLI from Bitwarden's site, then try again.";
+
     /// <summary>
     /// Runs `winget install Bitwarden.CLI` from the winget community source and returns once bw.exe exists.
     /// The installed executable is still verified as signed by Bitwarden Inc. before BwPicker runs it.

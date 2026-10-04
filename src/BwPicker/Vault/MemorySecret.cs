@@ -34,7 +34,7 @@ sealed class MemorySecret : IDisposable
 
     void Protect()
     {
-        if (!CryptProtectMemory(buffer, (uint)buffer.Length, 0))
+        if (!MemoryProtection.Protect(buffer))
         {
             CryptographicOperations.ZeroMemory(buffer);
             throw new InvalidOperationException("Could not protect the credential cache.", new Win32Exception());
@@ -50,7 +50,7 @@ sealed class MemorySecret : IDisposable
             buffer.CopyTo(copy, 0);
             try
             {
-                if (!CryptUnprotectMemory(copy, (uint)copy.Length, 0))
+                if (!MemoryProtection.Unprotect(copy))
                     throw new InvalidOperationException("Could not read the credential cache.", new Win32Exception());
                 return new SecretLease(copy.AsSpan(0, length));
             }
@@ -70,7 +70,7 @@ sealed class MemorySecret : IDisposable
             buffer.CopyTo(copy, 0);
             try
             {
-                if (!CryptUnprotectMemory(copy, (uint)copy.Length, 0))
+                if (!MemoryProtection.Unprotect(copy))
                     throw new InvalidOperationException("Could not read the credential cache.", new Win32Exception());
                 return use(copy.AsSpan(0, length));
             }
@@ -83,13 +83,6 @@ sealed class MemorySecret : IDisposable
         lock (gate) { disposed = true; CryptographicOperations.ZeroMemory(buffer); }
     }
     public override string ToString() => "[protected]";
-
-    [DllImport("crypt32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    static extern bool CryptProtectMemory([In, Out] byte[] data, uint length, uint flags);
-    [DllImport("crypt32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    static extern bool CryptUnprotectMemory([In, Out] byte[] data, uint length, uint flags);
 }
 
 sealed class SecretLease : IDisposable

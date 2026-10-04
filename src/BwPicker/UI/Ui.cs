@@ -47,8 +47,18 @@ class PanelWindow : Window
     protected PanelWindow()
     {
         Icon = Ui.AppIcon;
-        // A thin native border without a title bar keeps Windows 11's rounded corners and shadow.
-        WindowDecorations = WindowDecorations.BorderOnly;
+        if (OperatingSystem.IsWindows())
+        {
+            // A thin native border without a title bar keeps Windows 11's rounded corners and shadow.
+            WindowDecorations = WindowDecorations.BorderOnly;
+        }
+        else
+        {
+            // X11 window managers draw "border only" as a heavy frame (black without a compositor); draw our own line.
+            WindowDecorations = WindowDecorations.None;
+            BorderBrush = new SolidColorBrush(P.Border);
+            BorderThickness = new Thickness(1);
+        }
         CanResize = false;
         SizeToContent = SizeToContent.WidthAndHeight;
         Background = new SolidColorBrush(P.Background);
@@ -60,8 +70,8 @@ class PanelWindow : Window
         {
             if (!PlacedByCaller)
             {
-                PlaceOnMonitor(Native.GetCursorPos(out var cursor) ? new PixelPoint(cursor.X, cursor.Y) : null, 0.25);
-                Avalonia.Threading.Dispatcher.UIThread.Post(() => PlaceOnMonitor(Native.GetCursorPos(out var c) ? new PixelPoint(c.X, c.Y) : null, 0.25),
+                PlaceOnMonitor(Desktop.CursorPosition(), 0.25);
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => PlaceOnMonitor(Desktop.CursorPosition(), 0.25),
                     Avalonia.Threading.DispatcherPriority.Loaded);
             }
         };

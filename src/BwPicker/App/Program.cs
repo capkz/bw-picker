@@ -16,6 +16,16 @@ static partial class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // The updater checks a download's version this way before installing it.
+        if (args is ["--version"]) { Console.WriteLine(AppVersion.Text); return; }
+
+#if LINUX
+        // Xlib must be told about threads before any connection opens (the hotkey thread has its own).
+        if (X11.Available) X11.XInitThreads();
+        // `--pick` (bound to a desktop shortcut on Wayland) asks the running instance to open the picker.
+        if (args.Contains("--pick") && GlobalHotkey.SendPick()) return;
+#endif
+
         // Before any UI code loads SkiaSharp/HarfBuzz/ANGLE.
         if (!NativeLibraries.Ensure()) return;
 
@@ -28,8 +38,10 @@ static partial class Program
             return;
         }
 
+#if WINDOWS
         // Elevated helper started by the "Run as administrator" setting: install into Program Files and hand over.
         if (args.Contains("--install-admin")) { AdminInstall.RunHelper(args); return; }
+#endif
 
         // After a self-update, wait for the previous instance to exit before taking the single-instance lock.
         Updater.FinishUpdate(args);

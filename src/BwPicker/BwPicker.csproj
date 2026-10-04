@@ -2,26 +2,49 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <!-- Avalonia UI is cross-platform; the platform services (hotkey, typing, clipboard) are still Win32 for now. -->
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!--
+      One codebase, two builds: Windows (default) and Linux (`-r linux-x64`, or -p:TargetOS=linux). Shared code lives in
+      plain .cs files; platform services (hotkey, typing, clipboard, tray, autostart) in *.Windows.cs / *.Linux.cs.
+    -->
+    <TargetOS Condition="'$(TargetOS)' == '' and $(RuntimeIdentifier.StartsWith('linux'))">linux</TargetOS>
+    <TargetOS Condition="'$(TargetOS)' == ''">windows</TargetOS>
+    <TargetFramework Condition="'$(TargetOS)' == 'windows'">net10.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(TargetOS)' == 'linux'">net10.0</TargetFramework>
+    <DefineConstants Condition="'$(TargetOS)' == 'linux'">$(DefineConstants);LINUX</DefineConstants>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>BwPicker</AssemblyName>
     <RootNamespace>BwPicker</RootNamespace>
-    <ApplicationIcon>assets\bw-picker.ico</ApplicationIcon>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <!-- Local builds are "-dev" and never auto-update; release CI passes -p:Version from the git tag. -->
     <Version>0.0.0-dev</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(TargetOS)' == 'windows'">
+    <ApplicationIcon>assets\bw-picker.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <NativeLibraryExtension>.dll</NativeLibraryExtension>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetOS)' == 'linux'">
+    <NativeLibraryExtension>.so</NativeLibraryExtension>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetOS)' == 'windows'">
+    <Compile Remove="**\*.Linux.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetOS)' == 'linux'">
+    <Compile Remove="**\*.Windows.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.3" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
-    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.12" Condition="'$(TargetOS)' == 'windows'" />
+    <!-- Linux: desktop notifications and lock/sleep events over DBus (the same library Avalonia uses). -->
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.1" Condition="'$(TargetOS)' == 'linux'" />
   </ItemGroup>
 
   <ItemGroup>
@@ -37,7 +60,7 @@
   <Target Name="EmbedNativeLibraries" BeforeTargets="AssignTargetPaths;PrepareResourceNames" DependsOnTargets="ResolvePackageAssets"
           Condition="'$(RuntimeIdentifier)' != ''">
     <ItemGroup>
-      <EmbeddedResource Include="@(NativeCopyLocalItems->WithMetadataValue('Extension', '.dll'))" LogicalName="native/%(Filename)%(Extension)" />
+      <EmbeddedResource Include="@(NativeCopyLocalItems->WithMetadataValue('Extension', '$(NativeLibraryExtension)'))" LogicalName="native/%(Filename)%(Extension)" />
     </ItemGroup>
   </Target>
 

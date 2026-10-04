@@ -215,6 +215,13 @@ sealed class PickerWindow : PanelWindow
 
     void TypeInto(CredentialLease credential, TypeFields fields, bool submit)
     {
+        if (target.Handle == IntPtr.Zero)
+        {
+            notify(OperatingSystem.IsLinux()
+                ? "This desktop doesn't let apps type into other windows (Wayland). Use Ctrl+U / Ctrl+P to copy instead."
+                : "BwPicker couldn't tell which app to type into. Use Ctrl+U / Ctrl+P to copy instead.", Notice.Warning);
+            return;
+        }
         if (target.BlocksTyping)
         {
             notify($"{(target.AppName.Length > 0 ? target.AppName : "This app")} runs as administrator, so Windows blocks typing into it. " +

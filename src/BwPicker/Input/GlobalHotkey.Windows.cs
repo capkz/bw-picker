@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace BwPicker;
 
 /// <summary>
-/// System-wide hotkey via RegisterHotKey on a dedicated thread with its own message loop, independent of the
+/// System-wide Ctrl+Alt+B via RegisterHotKey on a dedicated thread with its own message loop, independent of the
 /// UI framework. <see cref="Pressed"/> is raised on that thread; marshal to the UI thread before use.
 /// </summary>
 sealed class GlobalHotkey : IDisposable
@@ -15,15 +15,19 @@ sealed class GlobalHotkey : IDisposable
 
     public event Action? Pressed;
 
-    public GlobalHotkey(uint modifiers, uint key)
+    public GlobalHotkey()
     {
-        thread = new Thread(() => Loop(modifiers, key)) { IsBackground = true, Name = "BwPicker hotkey" };
+        const uint key = 0x42; // B
+        thread = new Thread(() => Loop(Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, key)) { IsBackground = true, Name = "BwPicker hotkey" };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
     }
 
     /// <summary>False if another app already owns the combination.</summary>
     public bool Registered => registered.Task.GetAwaiter().GetResult();
+
+    /// <summary>Why the hotkey isn't available, if the generic "already in use" doesn't apply.</summary>
+    public string? Problem => null;
 
     void Loop(uint modifiers, uint key)
     {

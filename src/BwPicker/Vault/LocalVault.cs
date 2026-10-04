@@ -22,9 +22,11 @@ static class LocalVault
     {
         get
         {
-            string dir = Environment.GetEnvironmentVariable("BITWARDENCLI_APPDATA_DIR") is { Length: > 0 } custom
-                ? custom
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Bitwarden CLI");
+            if (Environment.GetEnvironmentVariable("BITWARDENCLI_APPDATA_DIR") is { Length: > 0 } custom) return Path.Combine(custom, "data.json");
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Bitwarden CLI");
+            // The snap package keeps its data inside the snap's own home folder.
+            string snap = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "snap", "bw", "current", ".config", "Bitwarden CLI");
+            if (OperatingSystem.IsLinux() && !Directory.Exists(dir) && Directory.Exists(snap)) dir = snap;
             return Path.Combine(dir, "data.json");
         }
     }

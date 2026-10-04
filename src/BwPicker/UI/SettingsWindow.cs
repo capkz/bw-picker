@@ -112,10 +112,10 @@ sealed class SettingsWindow : PanelWindow
             {
                 Ui.Header(P, "Settings", close, title: true),
                 Caption("GENERAL"),
-                Row("Start with Windows", Startup.AdminMode ? "As administrator, so it can type into admin apps" : "Open BwPicker in the tray when you sign in", startup),
-                Row("Run as administrator", "Needed to type into apps that run as administrator, such as some game launchers. " +
-                    "Without it, BwPicker may not be able to fill those apps and you'd copy and paste instead.", admin),
-                Row("Shortcut", "Opens the picker over the app you're using", keys),
+                Row(OperatingSystem.IsWindows() ? "Start with Windows" : "Start at sign-in",
+                    Startup.AdminMode ? "As administrator, so it can type into admin apps" : "Open BwPicker in the tray when you sign in", startup),
+                AdminRow(),
+                Row("Shortcut", ShortcutHint, keys),
                 Separator(),
                 Caption("ACCOUNT"),
                 Row(who, where, account),
@@ -190,6 +190,25 @@ sealed class SettingsWindow : PanelWindow
         catch (InvalidOperationException ex) { SetAccountMessage(ex.Message, error: true); }
         ShowServer(status);
     }
+
+    /// <summary>Windows only: Linux (X11) has no equivalent restriction on typing into other apps.</summary>
+    Control AdminRow()
+    {
+        var row = Row("Run as administrator", "Needed to type into apps that run as administrator, such as some game launchers. " +
+            "Without it, BwPicker may not be able to fill those apps and you'd copy and paste instead.", admin);
+        row.IsVisible = OperatingSystem.IsWindows();
+        return row;
+    }
+
+    static string ShortcutHint => OperatingSystem.IsLinux() && !X11Session
+        ? "On Wayland, bind it in your desktop's keyboard settings to: BwPicker --pick"
+        : "Opens the picker over the app you're using";
+
+#if LINUX
+    static bool X11Session => X11.Available;
+#else
+    static bool X11Session => true;
+#endif
 
     void ShowServer(BwStatus? current)
     {
