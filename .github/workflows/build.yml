@@ -67,6 +67,9 @@ jobs:
   package-linux:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
+    strategy:
+      matrix:
+        arch: [x64, arm64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,8 +82,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Release tags must look like v1.2.3"; exit 1; }
-          dotnet publish src/BwPicker/BwPicker.csproj -c Release -r linux-x64 --self-contained true \
-            -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:Version=$version -o publish
+          dotnet publish src/BwPicker/BwPicker.csproj -c Release -r linux-${{ matrix.arch }} --self-contained true             -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true -p:Version=$version -o publish
 
       # zip keeps the executable bit, so the unpacked app runs as is.
       - name: Package
@@ -88,12 +90,12 @@ jobs:
           mkdir pkg
           cp publish/BwPicker publish/*.so scripts/install-linux.sh src/BwPicker/assets/bw-picker.png LICENSE README.md SECURITY.md pkg/
           chmod 755 pkg/BwPicker pkg/install-linux.sh
-          (cd pkg && zip -X -9 ../BwPicker-linux-x64.zip *)
+          (cd pkg && zip -X -9 ../BwPicker-linux-${{ matrix.arch }}.zip *)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux
-          path: BwPicker-linux-x64.zip
+          name: linux-${{ matrix.arch }}
+          path: BwPicker-linux-${{ matrix.arch }}.zip
 
   release:
     needs: [package-windows, package-linux]
@@ -108,15 +110,16 @@ jobs:
           merge-multiple: true
 
       - name: Checksums
-        run: sha256sum BwPicker-win-x64.zip BwPicker-linux-x64.zip > SHA256SUMS.txt
+        run: sha256sum BwPicker-win-x64.zip BwPicker-linux-x64.zip BwPicker-linux-arm64.zip > SHA256SUMS.txt
 
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             BwPicker-win-x64.zip
             BwPicker-linux-x64.zip
+            BwPicker-linux-arm64.zip
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create ${{ github.ref_name }} BwPicker-win-x64.zip BwPicker-linux-x64.zip SHA256SUMS.txt --generate-notes --repo ${{ github.repository }}
+        run: gh release create ${{ github.ref_name }} BwPicker-win-x64.zip BwPicker-linux-x64.zip BwPicker-linux-arm64.zip SHA256SUMS.txt --generate-notes --repo ${{ github.repository }}
