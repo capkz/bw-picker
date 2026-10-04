@@ -28,10 +28,13 @@ static partial class Program
             return;
         }
 
+        // Elevated helper started by the "Run as administrator" setting: install into Program Files and hand over.
+        if (args.Contains("--install-admin")) { AdminInstall.RunHelper(args); return; }
+
         // After a self-update, wait for the previous instance to exit before taking the single-instance lock.
         Updater.FinishUpdate(args);
-        using var mutex = new Mutex(true, "BwPicker.SingleInstance", out bool first);
-        if (!first) return;
+        using var mutex = AcquireSingleInstance();
+        if (mutex == null) return;
 
         try
         {
@@ -47,6 +50,36 @@ static partial class Program
         App.Startup = () => tray = new TrayController(App.Shutdown, client);
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args, ShutdownMode.OnExplicitShutdown);
         tray?.Dispose();
+    }
+
+    /// <summary>
+    /// One BwPicker per session. When switching between normal and administrator mode the previous instance is still
+    /// exiting, so wait up to 10 seconds for it. An administrator instance's mutex can't even be opened by a normal one
+    /// (access denied), which also means "still running".
+    /// </summary>
+    static Mutex? AcquireSingleInstance()
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            try
+            {
+                var mutex = new Mutex(true, "BwPicker.SingleInstance", out bool created);
+                if (created) return mutex;
+                try
+                {
+                    if (mutex.WaitOne(deadline - DateTime.UtcNow is var left && left > TimeSpan.Zero ? left : TimeSpan.Zero)) return mutex;
+                }
+                catch (AbandonedMutexException) { return mutex; }
+                mutex.Dispose();
+                return null;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                if (DateTime.UtcNow >= deadline) return null;
+                Thread.Sleep(250);
+            }
+        }
     }
 
     public static AppBuilder BuildAvaloniaApp()

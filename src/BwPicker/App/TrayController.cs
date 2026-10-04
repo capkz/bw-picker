@@ -72,6 +72,16 @@ sealed class TrayController : IDisposable
         };
         updateTimer.Start();
 
+        // "Run as administrator" is on by default: a release build that isn't elevated yet asks once (UAC).
+        if (settings.RunAsAdmin && !Startup.AdminMode && !AppVersion.IsDevelopment)
+        {
+            Notify("BwPicker needs administrator rights to type into apps that run as administrator. Approve the Windows prompt, " +
+                "or turn it off in Settings.", Notice.Info);
+            var askLater = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            askLater.Tick += (_, _) => { askLater.Stop(); SetAdmin(true); };
+            askLater.Start();
+        }
+
         if (!settings.Welcomed)
         {
             Notify($"BwPicker is in your tray. Press {HotkeyLabel} over a login screen; click the icon for settings.", Notice.Info);
@@ -91,9 +101,39 @@ sealed class TrayController : IDisposable
     {
         if (shuttingDown) return;
         if (settingsWindow != null) { settingsWindow.Activate(); return; }
-        settingsWindow = new SettingsWindow(bw, settings, updater, Notify);
+        settingsWindow = new SettingsWindow(bw, settings, updater, Notify, setAdmin: SetAdmin);
         settingsWindow.Closed += (_, _) => settingsWindow = null;
         settingsWindow.Show();
+    }
+
+    /// <summary>Switches administrator mode; on success this instance exits and the switched copy takes over.</summary>
+    void SetAdmin(bool enable)
+    {
+        settings.RunAsAdmin = enable;
+        try { settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        if (enable == Startup.AdminMode) return;
+        try
+        {
+            if (enable)
+            {
+                if (!AdminInstall.RequestElevation())
+                {
+                    settings.RunAsAdmin = false;
+                    try { settings.Save(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                    Notify("Administrator mode stays off, so BwPicker can't type into apps that run as administrator. " +
+                        "You can turn it on in Settings.", Notice.Warning);
+                    settingsWindow?.RefreshAdmin();
+                    return;
+                }
+            }
+            else AdminInstall.LeaveAdminMode();
+            _ = Shutdown();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            Notify("Couldn't switch administrator mode. " + e.Message, Notice.Error);
+            settingsWindow?.RefreshAdmin();
+        }
     }
 
     void AnnounceUpdate(bool manual)

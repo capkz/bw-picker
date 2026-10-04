@@ -28,8 +28,13 @@ sealed class SettingsWindow : PanelWindow
     BwStatus? status;
     bool accountError, busy;
 
-    public SettingsWindow(BwClient bw, AppSettings settings, Updater updater, Action<string, Notice> notify, BwStatus? previewStatus = null)
+    readonly ToggleSwitch admin;
+    readonly Action<bool>? setAdmin;
+
+    public SettingsWindow(BwClient bw, AppSettings settings, Updater updater, Action<string, Notice> notify,
+        BwStatus? previewStatus = null, Action<bool>? setAdmin = null)
     {
+        this.setAdmin = setAdmin;
         this.bw = bw;
         this.settings = settings;
         this.updater = updater;
@@ -48,6 +53,13 @@ sealed class SettingsWindow : PanelWindow
         startup = new ToggleSwitch { IsChecked = preview || Startup.Enabled, OnContent = null, OffContent = null };
         autoUpdate = new ToggleSwitch { IsChecked = settings.CheckForUpdates, OnContent = null, OffContent = null };
         startup.IsCheckedChanged += (_, _) => ToggleStartup();
+        admin = new ToggleSwitch { IsChecked = preview || Startup.AdminMode, OnContent = null, OffContent = null };
+        admin.IsCheckedChanged += (_, _) =>
+        {
+            if (preview || admin.IsChecked == Startup.AdminMode) return;
+            admin.IsEnabled = false; // the app restarts in the other mode (or the toggle is reset if declined)
+            setAdmin?.Invoke(admin.IsChecked == true);
+        };
         autoUpdate.IsCheckedChanged += (_, _) => { settings.CheckForUpdates = autoUpdate.IsChecked == true; TrySave(); };
 
         var keys = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center,
@@ -101,6 +113,8 @@ sealed class SettingsWindow : PanelWindow
                 Ui.Header(P, "Settings", close, title: true),
                 Caption("GENERAL"),
                 Row("Start with Windows", Startup.AdminMode ? "As administrator, so it can type into admin apps" : "Open BwPicker in the tray when you sign in", startup),
+                Row("Run as administrator", "Needed to type into apps that run as administrator, such as some game launchers. " +
+                    "Without it, BwPicker may not be able to fill those apps and you'd copy and paste instead.", admin),
                 Row("Shortcut", "Opens the picker over the app you're using", keys),
                 Separator(),
                 Caption("ACCOUNT"),
@@ -141,7 +155,7 @@ sealed class SettingsWindow : PanelWindow
     static Control Spaced(Control c, double top) { c.Margin = new Thickness(0, top, 0, 0); return c; }
 
     Control Row(string title, string description, Control right) =>
-        Row(Ui.Text(title, 14, P.Text), Ui.Text(description, 12.5, P.SubtleText), right);
+        Row(Ui.Text(title, 14, P.Text), Ui.Text(description, 12.5, P.SubtleText, wrap: true), right);
 
     static Control Row(TextBlock title, TextBlock description, Control right)
     {
@@ -151,6 +165,13 @@ sealed class SettingsWindow : PanelWindow
         grid.Children.Add(text);
         Grid.SetColumn(right, 1); grid.Children.Add(right);
         return grid;
+    }
+
+    /// <summary>Shows the actual mode again, e.g. after the UAC prompt was declined.</summary>
+    public void RefreshAdmin()
+    {
+        admin.IsChecked = Startup.AdminMode;
+        admin.IsEnabled = true;
     }
 
     bool SignedIn => status is { Status: not "unauthenticated" };

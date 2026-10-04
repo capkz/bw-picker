@@ -10,6 +10,9 @@ sealed class AppSettings
     public DateTimeOffset? LastUpdateCheck { get; set; }
     public bool Welcomed { get; set; }
 
+    /// <summary>Windows: run elevated from Program Files so typing reaches apps that run as administrator. On by default.</summary>
+    public bool RunAsAdmin { get; set; } = true;
+
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     internal static string DefaultPath => Path.Combine(
@@ -89,6 +92,13 @@ static class Startup
             return;
         }
         if (RunEntry() is string current && current != Command && !File.Exists(current.Trim('"'))) SetRunEntry(true);
+    }
+
+    /// <summary>Removes the elevated startup task; keeps a normal per-user autostart entry if <paramref name="keepAutostart"/>.</summary>
+    public static void LeaveAdminMode(bool keepAutostart)
+    {
+        DeleteTask();
+        SetRunEntry(keepAutostart);
     }
 
     static string? RunEntry()
