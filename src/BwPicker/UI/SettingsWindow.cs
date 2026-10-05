@@ -113,7 +113,7 @@ sealed class SettingsWindow : PanelWindow
                 Ui.Header(P, "Settings", close, title: true),
                 Caption("GENERAL"),
                 Row(OperatingSystem.IsWindows() ? "Start with Windows" : "Start at sign-in",
-                    Startup.AdminMode ? "As administrator, so it can type into admin apps" : "Open BwPicker in the tray when you sign in", startup),
+                    Startup.AdminMode ? "As administrator, so it can type into admin apps" : (OperatingSystem.IsMacOS() ? "Open BwPicker in the menu bar when you sign in" : "Open BwPicker in the tray when you sign in"), startup),
                 AdminRow(),
                 Row("Shortcut", ShortcutHint, keys),
                 Separator(),
