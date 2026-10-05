@@ -3,14 +3,17 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <!--
-      One codebase, two builds: Windows (default) and Linux (`-r linux-x64`, or -p:TargetOS=linux). Shared code lives in the
-      usual folders; Platform/Windows and Platform/Linux hold each platform's services (hotkey, typing, clipboard, tray, autostart).
+      One codebase, three builds: Windows (default), Linux (`-r linux-x64`, or -p:TargetOS=linux) and macOS (`-r osx-arm64`,
+      or -p:TargetOS=osx). Shared code lives in the usual folders; Platform/Windows, Platform/Linux and Platform/MacOS hold
+      each platform's services (hotkey, typing, clipboard, tray, autostart), and Platform/Unix what Linux and macOS share.
     -->
     <TargetOS Condition="'$(TargetOS)' == '' and $(RuntimeIdentifier.StartsWith('linux'))">linux</TargetOS>
+    <TargetOS Condition="'$(TargetOS)' == '' and $(RuntimeIdentifier.StartsWith('osx'))">osx</TargetOS>
     <TargetOS Condition="'$(TargetOS)' == ''">windows</TargetOS>
     <TargetFramework Condition="'$(TargetOS)' == 'windows'">net10.0-windows</TargetFramework>
-    <TargetFramework Condition="'$(TargetOS)' == 'linux'">net10.0</TargetFramework>
+    <TargetFramework Condition="'$(TargetOS)' != 'windows'">net10.0</TargetFramework>
     <DefineConstants Condition="'$(TargetOS)' == 'linux'">$(DefineConstants);LINUX</DefineConstants>
+    <DefineConstants Condition="'$(TargetOS)' == 'osx'">$(DefineConstants);MACOS</DefineConstants>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -30,12 +33,21 @@
   <PropertyGroup Condition="'$(TargetOS)' == 'linux'">
     <NativeLibraryExtension>.so</NativeLibraryExtension>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetOS)' == 'osx'">
+    <NativeLibraryExtension>.dylib</NativeLibraryExtension>
+  </PropertyGroup>
 
-  <ItemGroup Condition="'$(TargetOS)' == 'windows'">
+  <ItemGroup Condition="'$(TargetOS)' != 'windows'">
+    <Compile Remove="Platform\Windows\**" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetOS)' != 'linux'">
     <Compile Remove="Platform\Linux\**" />
   </ItemGroup>
-  <ItemGroup Condition="'$(TargetOS)' == 'linux'">
-    <Compile Remove="Platform\Windows\**" />
+  <ItemGroup Condition="'$(TargetOS)' != 'osx'">
+    <Compile Remove="Platform\MacOS\**" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetOS)' == 'windows'">
+    <Compile Remove="Platform\Unix\**" />
   </ItemGroup>
 
   <ItemGroup>

@@ -36,7 +36,7 @@ sealed class InputTyper(IKeyboard keyboard)
         Validate(credential.Username.AsSpan());
         if (credential.Password is { } available) Validate(available.Characters);
         if (!keyboard.CanType(credential.Username.AsSpan()) || (credential.Password is { } typed && !keyboard.CanType(typed.Characters)))
-            throw new InvalidOperationException("This login has characters your keyboard layout can't type here. Use Ctrl+U / Ctrl+P to copy instead.");
+            throw new InvalidOperationException($"This login has characters your keyboard layout can't type here. Use {Shortcuts.Copy} to copy instead.");
         keyboard.Focus(window);
         int tries = 0;
         while (keyboard.Foreground != window && tries++ < 40) keyboard.Wait(25);

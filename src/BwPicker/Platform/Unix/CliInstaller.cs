@@ -9,7 +9,8 @@ namespace BwPicker;
 /// <summary>
 /// Installs the official Bitwarden CLI from Bitwarden's GitHub releases, only when the user asks to: downloads the
 /// zip for this CPU, checks it against the SHA-256 digest GitHub records for the release asset, and puts bw in
-/// BwPicker's own folder (~/.local/share/BwPicker/cli), where only this user can change it.
+/// BwPicker's own folder (~/.local/share/BwPicker/cli on Linux, ~/Library/Application Support/BwPicker/cli on macOS),
+/// where only this user can change it.
 /// </summary>
 static class CliInstaller
 {
@@ -30,7 +31,8 @@ static class CliInstaller
         http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("BwPicker", AppVersion.Text));
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
-        string prefix = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "bw-linux-arm64-" : "bw-linux-";
+        string os = OperatingSystem.IsMacOS() ? "macos" : "linux";
+        string prefix = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? $"bw-{os}-arm64-" : $"bw-{os}-";
         (Uri url, byte[] digest) = await FindAsset(http, prefix);
 
         byte[] zip;

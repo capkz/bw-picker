@@ -18,6 +18,8 @@ jobs:
             target: windows
           - os: ubuntu-latest
             target: linux
+          - os: macos-latest
+            target: osx
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -97,8 +99,64 @@ jobs:
           name: linux-${{ matrix.arch }}
           path: BwPicker-linux-${{ matrix.arch }}.zip
 
+  # Also on pull requests, so the app bundle is checked before a release (without publishing anything).
+  package-macos:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request'
+    needs: build
+    strategy:
+      matrix:
+        arch: [arm64, x64]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Package
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Release tags must look like v1.2.3"; exit 1; }
+          else
+            version="0.0.0-pr"
+          fi
+          sh scripts/package-macos.sh ${{ matrix.arch }} "$version"
+          # The updater only takes BwPicker.app/Contents/MacOS/* from this zip.
+          unzip -l BwPicker-macos-${{ matrix.arch }}.zip | grep -q " BwPicker.app/Contents/MacOS/BwPicker$"
+
+      # The runner is Apple silicon: start the arm64 app, check it stays up, and keep a screenshot for review.
+      - name: Smoke test
+        if: matrix.arch == 'arm64'
+        run: |
+          pkg/BwPicker.app/Contents/MacOS/BwPicker --version
+          open pkg/BwPicker.app
+          sleep 15
+          pgrep -x BwPicker
+          screencapture -x smoke.png || true
+          pkill -x BwPicker || true
+          app=pkg/BwPicker.app/Contents/MacOS/BwPicker
+          "$app" --preview --query disc --snapshot preview-picker.png
+          "$app" --preview --settings --snapshot preview-settings.png
+          "$app" --preview --dark --unlock --snapshot preview-unlock-dark.png
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.arch == 'arm64' && always()
+        with:
+          name: macos-smoke
+          path: |
+            smoke.png
+            preview-*.png
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-${{ matrix.arch }}
+          path: BwPicker-macos-${{ matrix.arch }}.zip
+
   release:
-    needs: [package-windows, package-linux]
+    needs: [package-windows, package-linux, package-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write      # create the release
@@ -110,7 +168,7 @@ jobs:
           merge-multiple: true
 
       - name: Checksums
-        run: sha256sum BwPicker-win-x64.zip BwPicker-linux-x64.zip BwPicker-linux-arm64.zip > SHA256SUMS.txt
+        run: sha256sum BwPicker-win-x64.zip BwPicker-linux-x64.zip BwPicker-linux-arm64.zip BwPicker-macos-arm64.zip BwPicker-macos-x64.zip > SHA256SUMS.txt
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
@@ -118,8 +176,10 @@ jobs:
             BwPicker-win-x64.zip
             BwPicker-linux-x64.zip
             BwPicker-linux-arm64.zip
+            BwPicker-macos-arm64.zip
+            BwPicker-macos-x64.zip
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create ${{ github.ref_name }} BwPicker-win-x64.zip BwPicker-linux-x64.zip BwPicker-linux-arm64.zip SHA256SUMS.txt --generate-notes --repo ${{ github.repository }}
+        run: gh release create ${{ github.ref_name }} BwPicker-win-x64.zip BwPicker-linux-x64.zip BwPicker-linux-arm64.zip BwPicker-macos-arm64.zip BwPicker-macos-x64.zip SHA256SUMS.txt --generate-notes --repo ${{ github.repository }}

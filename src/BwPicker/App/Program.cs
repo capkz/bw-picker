@@ -105,7 +105,8 @@ static partial class Program
             AppDomain.CurrentDomain.UnhandledException += (_, e) => System.Diagnostics.Trace.WriteLine($"Unhandled: {e.ExceptionObject}");
             TaskScheduler.UnobservedTaskException += (_, e) => System.Diagnostics.Trace.WriteLine($"Unobserved: {e.Exception}");
         }
-        return AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace(Avalonia.Logging.LogEventLevel.Warning);
+        return AppBuilder.Configure<App>().UsePlatformDetect().LogToTrace(Avalonia.Logging.LogEventLevel.Warning)
+            .With(new MacOSPlatformOptions { ShowInDock = false }); // a menu-bar app on macOS (ignored elsewhere)
     }
 
     // --preview [--dark|--light] [--unlock|--signin|--settings|--clisetup] [--query text] [--snapshot file.png]

@@ -62,8 +62,8 @@ sealed class SettingsWindow : PanelWindow
         };
         autoUpdate.IsCheckedChanged += (_, _) => { settings.CheckForUpdates = autoUpdate.IsChecked == true; TrySave(); };
 
-        var keys = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center,
-            Children = { Ui.Keycap(P, "Ctrl"), Ui.Keycap(P, "Alt"), Ui.Keycap(P, "B") } };
+        var keys = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        foreach (string key in Shortcuts.HotkeyKeys) keys.Children.Add(Ui.Keycap(P, key));
 
         who = Ui.Text(preview ? "Preview" : "Checking…", 14, P.Text);
         where = Ui.Text("", 12.5, P.SubtleText);
@@ -113,7 +113,7 @@ sealed class SettingsWindow : PanelWindow
                 Ui.Header(P, "Settings", close, title: true),
                 Caption("GENERAL"),
                 Row(OperatingSystem.IsWindows() ? "Start with Windows" : "Start at sign-in",
-                    Startup.AdminMode ? "As administrator, so it can type into admin apps" : "Open BwPicker in the tray when you sign in", startup),
+                    Startup.AdminMode ? "As administrator, so it can type into admin apps" : (OperatingSystem.IsMacOS() ? "Open BwPicker in the menu bar when you sign in" : "Open BwPicker in the tray when you sign in"), startup),
                 AdminRow(),
                 Row("Shortcut", ShortcutHint, keys),
                 Separator(),

@@ -30,9 +30,12 @@ sealed record UpdatePayload(string Folder, IReadOnlyDictionary<string, byte[]> H
 sealed class Updater(AppSettings settings, HttpClient? http = null)
 {
     internal const string Repository = "capkz/bw-picker";
-    /// <summary>This platform's release package, e.g. BwPicker-win-x64.zip or BwPicker-linux-x64.zip.</summary>
+    /// <summary>This platform's release package, e.g. BwPicker-win-x64.zip, BwPicker-linux-x64.zip or BwPicker-macos-arm64.zip.</summary>
     internal static readonly string PackageName = OperatingSystem.IsWindows() ? "BwPicker-win-x64.zip"
-        : $"BwPicker-linux-{(System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64")}.zip";
+        : $"BwPicker-{(OperatingSystem.IsMacOS() ? "macos" : "linux")}-{(System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64")}.zip";
+
+    /// <summary>The macOS package is the app bundle; the files that update live in its Contents/MacOS folder.</summary>
+    const string MacAppFolder = "BwPicker.app/Contents/MacOS/";
     internal static readonly string ExeName = OperatingSystem.IsWindows() ? "BwPicker.exe" : "BwPicker";
     const string ChecksumsName = "SHA256SUMS.txt";
     const long MaxPackageBytes = 300 * 1024 * 1024; // self-contained single-file build
@@ -183,10 +186,10 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
         {
             foreach (var entry in archive.Entries)
             {
-                if (!IsAppFile(entry.FullName)) continue;
+                if (AppEntryName(entry.FullName) is not { } name || !IsAppFile(name)) continue;
                 extracted += entry.Length;
                 if (entry.Length > MaxPackageBytes || extracted > MaxPackageBytes) throw new InvalidOperationException("The release package is unexpectedly large.");
-                hashes[entry.Name] = await Extract(entry, Path.Combine(payload, entry.Name), cancel);
+                hashes[name] = await Extract(entry, Path.Combine(payload, name), cancel);
             }
         }
         if (!hashes.ContainsKey(ExeName)) throw new InvalidOperationException($"The release package has no {ExeName}.");
@@ -238,14 +241,22 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
     }
 
     /// <summary>
+    /// The name a zip entry would have in the app folder: on macOS only entries directly in the bundle's Contents/MacOS
+    /// count (the rest of the bundle stays as installed); elsewhere the entry's own name, checked by <see cref="IsAppFile"/>.
+    /// </summary>
+    internal static string? AppEntryName(string fullName) =>
+        !OperatingSystem.IsMacOS() ? fullName
+        : fullName.StartsWith(MacAppFolder, StringComparison.Ordinal) ? fullName[MacAppFolder.Length..] : null;
+
+    /// <summary>
     /// The executable or a native library at the zip's root (no folders, so nothing can be written outside the app
-    /// folder): .exe/.dll on Windows, BwPicker and *.so on Linux.
+    /// folder): .exe/.dll on Windows, BwPicker and *.so on Linux, BwPicker and *.dylib on macOS.
     /// </summary>
     internal static bool IsAppFile(string entryName) =>
         entryName.Length > 0 && entryName.IndexOfAny(['/', '\\', ':']) < 0 && !entryName.StartsWith('.') &&
         (OperatingSystem.IsWindows()
             ? entryName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || entryName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-            : entryName == ExeName || entryName.EndsWith(".so", StringComparison.Ordinal));
+            : entryName == ExeName || entryName.EndsWith(OperatingSystem.IsMacOS() ? ".dylib" : ".so", StringComparison.Ordinal));
 
     void SetState(bool working, string status)
     {
@@ -303,7 +314,8 @@ sealed class Updater(AppSettings settings, HttpClient? http = null)
             foreach (string target in moved) { try { File.Move(target + ".old", target, overwrite: true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
             if (e is UnauthorizedAccessException)
                 throw new InvalidOperationException($"BwPicker can't replace itself in {folder}. Move it to a folder you can write to, such as " +
-                    (OperatingSystem.IsWindows() ? "%LOCALAPPDATA%\\Programs\\BwPicker" : "~/.local/share/BwPicker") + ", or update manually.");
+                    (OperatingSystem.IsWindows() ? "%LOCALAPPDATA%\\Programs\\BwPicker" : OperatingSystem.IsMacOS() ? "/Applications" : "~/.local/share/BwPicker") +
+                    ", or update manually.");
             throw;
         }
     }

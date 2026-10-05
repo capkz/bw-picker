@@ -226,6 +226,9 @@ static class Tests
              "html_url":"https://github.com/capkz/bw-picker/releases/tag/{{tag}}",
              "assets":[{"name":"BwPicker-win-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-win-x64.zip"},
                        {"name":"BwPicker-linux-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-linux-x64.zip"},
+                       {"name":"BwPicker-linux-arm64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-linux-arm64.zip"},
+                       {"name":"BwPicker-macos-arm64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-macos-arm64.zip"},
+                       {"name":"BwPicker-macos-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-macos-x64.zip"},
                        {"name":"SHA256SUMS.txt","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/SHA256SUMS.txt"}]}
             """;
         var current = new Version(1, 2, 0);
@@ -251,6 +254,13 @@ static class Tests
 #if WINDOWS
         string[] accepted = ["BwPicker.exe", "libSkiaSharp.dll", "av_libglesv2.dll"];
         string[] refused = ["../evil.dll", "sub/evil.dll", "sub\\evil.dll", "C:evil.exe", "README.md", "Install-Admin.ps1", ".hidden.dll", ""];
+#elif MACOS
+        string[] accepted = ["BwPicker", "libSkiaSharp.dylib", "libAvaloniaNative.dylib"];
+        string[] refused = ["../evil.dylib", "sub/evil.dylib", "BwPicker.exe", "evil", "Info.plist", ".hidden.dylib", "libx.so", ""];
+        // Only the bundle's Contents/MacOS files update; the rest of the bundle (Info.plist, resources) stays.
+        Assert(Updater.AppEntryName("BwPicker.app/Contents/MacOS/BwPicker") == "BwPicker", "Bundle executable not found in the package");
+        Assert(Updater.AppEntryName("BwPicker.app/Contents/Info.plist") == null, "File outside Contents/MacOS taken from the package");
+        Assert(Updater.AppEntryName("BwPicker") == null, "Root-level file taken from a macOS package");
 #else
         string[] accepted = ["BwPicker", "libSkiaSharp.so", "libHarfBuzzSharp.so"];
         string[] refused = ["../evil.so", "sub/evil.so", "sub\\evil.so", "BwPicker.exe", "evil", "README.md", ".hidden.so", "BwPicker.sh", ""];

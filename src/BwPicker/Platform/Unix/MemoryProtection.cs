@@ -4,8 +4,8 @@ using System.Security.Cryptography;
 namespace BwPicker;
 
 /// <summary>
-/// Encrypts buffers (multiples of 16 bytes) in place with a random key that exists only in this process, the Linux
-/// counterpart of CryptProtectMemory: secrets never sit in memory as plaintext between uses. The key lives in a
+/// Encrypts buffers (multiples of 16 bytes) in place with a random key that exists only in this process, the Linux and
+/// macOS counterpart of CryptProtectMemory: secrets never sit in memory as plaintext between uses. The key lives in a
 /// pinned buffer that is locked into RAM (never swapped) and excluded from core dumps where the kernel allows it.
 /// </summary>
 static class MemoryProtection
@@ -23,9 +23,11 @@ static class MemoryProtection
             {
                 // Best effort: these can fail under tight RLIMIT_MEMLOCK; the key is still process-only.
                 _ = mlock((IntPtr)p, (nuint)bytes.Length);
+#if LINUX
                 long page = Environment.SystemPageSize;
                 long start = (long)p & ~(page - 1);
                 _ = madvise((IntPtr)start, (nuint)page, 16 /* MADV_DONTDUMP */);
+#endif
             }
         }
         return bytes;
@@ -55,5 +57,7 @@ static class MemoryProtection
     }
 
     [DllImport("libc", SetLastError = true)] static extern int mlock(IntPtr address, nuint length);
+#if LINUX
     [DllImport("libc", SetLastError = true)] static extern int madvise(IntPtr address, nuint length, int advice);
+#endif
 }

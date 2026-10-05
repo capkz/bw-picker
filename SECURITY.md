@@ -50,6 +50,22 @@ Also validated on Ubuntu 26.04 with GNOME 50 on Wayland: the shortcut and keyboa
 
 Validated on Ubuntu 24.04 with Xfce on X11 (Proxmox VM): hotkey grab, picker placement, typing username/Tab/password into a GTK 4 login form including non-layout Unicode and with Caps Lock on, copying through xclip, clipboard clearing and vault lock on `loginctl lock-session`, the CLI installer and ownership check, `--pick`, autostart, desktop notifications and the regression suite.
 
+## macOS build
+
+Shares the Unix code with Linux (process-bound AES memory protection with an `mlock`ed key, the CLI ownership/permission check, the checksum-verified CLI installer). What differs:
+
+| Boundary | macOS behaviour |
+| --- | --- |
+| Executable trust | `bw` from BwPicker's installer (`~/Library/Application Support/BwPicker/cli`), Homebrew (`/opt/homebrew`, `/usr/local`) or elsewhere on `PATH`, accepted only if it and every folder above it are owned by root or the user and not writable by others. Homebrew folders belong to the user who installed Homebrew, so another account's Homebrew isn't trusted. No Developer ID signature check yet. |
+| Typing | CoreGraphics keyboard events carrying the characters (`CGEventKeyboardSetUnicodeString`), with modifier flags cleared, so the layout and held keys can't change what's typed. Needs the user's Accessibility approval. Destination identity: the frontmost app's process ID and start time (`proc_pidinfo`) and its focused window's title (Accessibility API); before each key the same app must be frontmost and hold keyboard focus, with the same title. |
+| Hotkey | Carbon `RegisterEventHotKey` (⌃⌥B): needs no permission and sees no other keystrokes. |
+| Clipboard | `NSPasteboard` with `org.nspasteboard.ConcealedType` and `TransientType`, the convention clipboard managers and Handoff respect; cleared after 30 s and on lock only if the pasteboard still holds BwPicker's copy (change count). |
+| Lock events | The session's `CGSSessionScreenIsLocked` flag, polled every 2 s; sleep is detected on wake (wall clock advanced while `CLOCK_UPTIME_RAW` didn't) and revokes the vault before anything else runs. |
+| Packaging | An ad-hoc signed `.app` (no Developer ID, not notarized): Gatekeeper needs a one-time right-click → Open, and Accessibility approval is tied to the build, so it must be re-granted after each update. Updates replace only `Contents/MacOS` files, with the same checksum, version and root-entry rules as elsewhere. |
+| Notifications | Shown with `osascript` (`display notification`), the text passed as arguments, not script source. |
+
+Not yet validated on a physical Mac: CI builds and runs the regression suite and a launch smoke test on GitHub's Apple-silicon runners only.
+
 ## Plaintext and remaining limits
 
 * Passwords must temporarily exist as plaintext in the password textbox, CLI process environment/output, short-lived decoded buffers, Windows input events, the destination app, and—when explicitly copied—the system clipboard. Controlled buffers are wiped; Windows/.NET/Bitwarden-owned copies and immutable strings cannot be reliably erased by this app. Process creation still requires transient .NET strings for the master password/session environment values.

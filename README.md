@@ -6,7 +6,7 @@
 [![Downloads](https://img.shields.io/github/downloads/capkz/bw-picker/total?label=downloads)](https://github.com/capkz/bw-picker/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/capkz/bw-picker/build.yml?branch=main&label=build)](https://github.com/capkz/bw-picker/actions/workflows/build.yml)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE)
-[![Windows 10/11 | Linux](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20%7C%20Linux-0078D4)](#requirements)
+[![Windows 10/11 | Linux | macOS](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20%7C%20Linux%20%7C%20macOS-0078D4)](#requirements)
 
 **Bitwarden auto-type and autofill for desktop apps on Windows and Linux.**
 
@@ -46,7 +46,7 @@ The Bitwarden browser extension only fills web pages. The desktop app's Autotype
 
 ## Requirements
 
-- Windows 10 or 11, or a 64-bit Linux desktop (see [Linux](#linux) for what works where)
+- Windows 10 or 11, a 64-bit Linux desktop (see [Linux](#linux) for what works where), or macOS 12 or later (see [macOS](#macos))
 - Nothing else for the release build (it includes its own .NET runtime); the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to build from source
 - The official Bitwarden CLI. If it's missing, BwPicker offers to install it (with winget on Windows, from Bitwarden's GitHub releases on Linux). On Windows it refuses to run a `bw.exe` that isn't signed by Bitwarden Inc.
 
@@ -101,6 +101,19 @@ sh install-linux.sh
 
 To build from source on Linux: `dotnet build BwPicker.sln -c Release -p:TargetOS=linux`.
 
+### macOS
+
+> **Beta, untested on real Macs.** Built and smoke-tested on GitHub's macOS runners only. Feedback welcome in [Discussions](https://github.com/capkz/bw-picker/discussions).
+
+Download `BwPicker-macos-arm64.zip` (Apple silicon) or `BwPicker-macos-x64.zip` (Intel), unzip it and move `BwPicker.app` to Applications. It lives in the menu bar, not the Dock.
+
+- **First start:** the app isn't signed with an Apple Developer ID, so macOS blocks a plain double-click. Right-click (or Control-click) `BwPicker.app` → **Open** → **Open**, once.
+- **Typing** needs Accessibility access: the first time you type, macOS asks you to allow BwPicker in System Settings → Privacy & Security → Accessibility. Because the app isn't Developer ID signed, macOS forgets this after each update: remove BwPicker from that list and add it again (or toggle it off and on).
+- The shortcut is **⌃⌥B** (Control+Option+B); in the picker, ⌘ works where Windows uses Ctrl (⌘↩ password only, ⌘U / ⌘P to copy). Any character types correctly, whatever the keyboard layout.
+- Copies are marked as concealed and transient, so clipboard managers and Universal Clipboard leave them alone.
+
+To build from source on a Mac: `dotnet build BwPicker.sln -c Release -p:TargetOS=osx`.
+
 ### Apps that run as administrator
 
 Windows doesn't let a normal app type into an app running as administrator (some game launchers do), so BwPicker tells you to use `Ctrl+U` / `Ctrl+P` and paste instead. To have it type there too, install it with the included script:
@@ -142,11 +155,13 @@ src/BwPicker/
   Updates/   GitHub release check and self-update
   Platform/
     Windows/ hotkey, SendInput typing, clipboard, tray and notifications, autostart, admin mode, CLI signature check
-    Linux/   X11 and Wayland (portals, AT-SPI) hotkey and typing, clipboard, tray, DBus notifications, autostart, CLI checks
+    Linux/   X11 and Wayland (portals, AT-SPI) hotkey and typing, clipboard, tray, DBus notifications, autostart
+    MacOS/   Carbon hotkey, CoreGraphics typing, Accessibility window checks, pasteboard, menu-bar icon, LaunchAgent
+    Unix/    shared by Linux and macOS: memory protection, CLI ownership checks, CLI installer
 tests/BwPicker.Tests/   regression checks with a fake CLI
 ```
 
-Each build compiles the shared folders plus its own `Platform/` folder; the Linux build is selected with `-p:TargetOS=linux` or `-r linux-x64`.
+Each build compiles the shared folders plus its own `Platform/` folder (and `Unix/` on Linux and macOS); select Linux with `-p:TargetOS=linux` or `-r linux-x64`, macOS with `-p:TargetOS=osx` or `-r osx-arm64`.
 
 ```powershell
 dotnet build BwPicker.sln -c Release

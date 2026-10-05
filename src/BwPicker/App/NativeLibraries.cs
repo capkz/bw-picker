@@ -12,7 +12,7 @@ namespace BwPicker;
 static class NativeLibraries
 {
     const string Prefix = "native/";
-    static readonly string Extension = OperatingSystem.IsWindows() ? ".dll" : ".so";
+    static readonly string Extension = OperatingSystem.IsWindows() ? ".dll" : OperatingSystem.IsMacOS() ? ".dylib" : ".so";
 
     /// <summary>False if a library couldn't be restored; the user has been told why.</summary>
     public static bool Ensure()
