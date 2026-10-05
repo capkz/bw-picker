@@ -226,6 +226,9 @@ static class Tests
              "html_url":"https://github.com/capkz/bw-picker/releases/tag/{{tag}}",
              "assets":[{"name":"BwPicker-win-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-win-x64.zip"},
                        {"name":"BwPicker-linux-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-linux-x64.zip"},
+                       {"name":"BwPicker-linux-arm64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-linux-arm64.zip"},
+                       {"name":"BwPicker-macos-arm64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-macos-arm64.zip"},
+                       {"name":"BwPicker-macos-x64.zip","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/BwPicker-macos-x64.zip"},
                        {"name":"SHA256SUMS.txt","browser_download_url":"https://{{host}}/capkz/bw-picker/releases/download/{{tag}}/SHA256SUMS.txt"}]}
             """;
         var current = new Version(1, 2, 0);
