@@ -136,12 +136,18 @@ jobs:
           pgrep -x BwPicker
           screencapture -x smoke.png || true
           pkill -x BwPicker || true
+          app=pkg/BwPicker.app/Contents/MacOS/BwPicker
+          "$app" --preview --query disc --snapshot preview-picker.png
+          "$app" --preview --settings --snapshot preview-settings.png
+          "$app" --preview --dark --unlock --snapshot preview-unlock-dark.png
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: matrix.arch == 'arm64' && always()
         with:
           name: macos-smoke
-          path: smoke.png
+          path: |
+            smoke.png
+            preview-*.png
           if-no-files-found: ignore
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
