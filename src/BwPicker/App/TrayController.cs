@@ -5,7 +5,7 @@ namespace BwPicker;
 /// <summary>The tray icon, global hotkey, auto-lock and update checks; owns the vault client.</summary>
 sealed class TrayController : IDisposable
 {
-    const string HotkeyLabel = "Ctrl+Alt+B";
+    static readonly string HotkeyLabel = Shortcuts.Hotkey;
     static readonly TimeSpan AutoLockAfter = TimeSpan.FromMinutes(15);
 
     readonly BwClient bw;

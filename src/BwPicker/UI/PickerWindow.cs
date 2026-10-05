@@ -19,7 +19,7 @@ sealed class PickerWindow : PanelWindow
     [
         (["Enter"], "Type both"),
         (["Tab"], "Username only"),
-        (["Ctrl", "Enter"], "Password only"),
+        ([Shortcuts.Command, "Enter"], "Password only"),
         (["Shift"], "+ submit"),
     ];
 
@@ -171,7 +171,9 @@ sealed class PickerWindow : PanelWindow
     async void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (IsModifier(e.Key)) heldModifiers.Add(e.Key);
-        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control), shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        // Command on the Mac (Control works there too).
+        bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control) || (OperatingSystem.IsMacOS() && e.KeyModifiers.HasFlag(KeyModifiers.Meta));
+        bool shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         switch (e.Key)
         {
             case Key.Escape: e.Handled = true; Close(); break;
@@ -241,7 +243,7 @@ sealed class PickerWindow : PanelWindow
         {
             notify(OperatingSystem.IsLinux()
                 ? "This desktop doesn't let BwPicker type into other apps. Use Ctrl+U / Ctrl+P to copy instead."
-                : "BwPicker couldn't tell which app to type into. Use Ctrl+U / Ctrl+P to copy instead.", Notice.Warning);
+                : $"BwPicker couldn't tell which app to type into. Use {Shortcuts.Copy} to copy instead.", Notice.Warning);
             return;
         }
         if (target.BlocksTyping)

@@ -1,18 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- Builds for the same platform as the app: Windows by default, Linux with -r linux-x64 or -p:TargetOS=linux. -->
+    <!-- Builds for the same platform as the app: Windows by default, Linux or macOS with -r or -p:TargetOS=linux|osx. -->
     <TargetOS Condition="'$(TargetOS)' == '' and $(RuntimeIdentifier.StartsWith('linux'))">linux</TargetOS>
+    <TargetOS Condition="'$(TargetOS)' == '' and $(RuntimeIdentifier.StartsWith('osx'))">osx</TargetOS>
     <TargetOS Condition="'$(TargetOS)' == ''">windows</TargetOS>
     <TargetFramework Condition="'$(TargetOS)' == 'windows'">net10.0-windows</TargetFramework>
-    <TargetFramework Condition="'$(TargetOS)' == 'linux'">net10.0</TargetFramework>
+    <TargetFramework Condition="'$(TargetOS)' != 'windows'">net10.0</TargetFramework>
     <DefineConstants Condition="'$(TargetOS)' == 'linux'">$(DefineConstants);LINUX</DefineConstants>
+    <DefineConstants Condition="'$(TargetOS)' == 'osx'">$(DefineConstants);MACOS</DefineConstants>
 
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\..\src\BwPicker\BwPicker.csproj" /></ItemGroup>
   <ItemGroup Condition="'$(TargetOS)' == 'windows'">
-    <Compile Remove="Platform/Linux/**" />
+    <Compile Remove="Platform/Unix/**" />
   </ItemGroup>
 </Project>

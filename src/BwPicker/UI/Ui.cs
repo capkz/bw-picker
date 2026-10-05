@@ -112,6 +112,16 @@ class PanelWindow : Window
     }
 }
 
+/// <summary>How shortcuts are written on this platform: Ctrl+Alt+B on Windows and Linux, ⌃⌥B and ⌘ on the Mac.</summary>
+static class Shortcuts
+{
+    public static readonly string[] HotkeyKeys = OperatingSystem.IsMacOS() ? ["⌃", "⌥", "B"] : ["Ctrl", "Alt", "B"];
+    public static readonly string Hotkey = OperatingSystem.IsMacOS() ? "⌃⌥B" : "Ctrl+Alt+B";
+    /// <summary>The key that goes with Enter, U and P in the picker (Command on the Mac, where Ctrl works too).</summary>
+    public static readonly string Command = OperatingSystem.IsMacOS() ? "⌘" : "Ctrl";
+    public static readonly string Copy = OperatingSystem.IsMacOS() ? "⌘U / ⌘P" : "Ctrl+U / Ctrl+P";
+}
+
 static class Ui
 {
     public static readonly FontFamily Font = new("Segoe UI Variable Text, Segoe UI, Inter, Cantarell, Noto Sans, sans-serif");

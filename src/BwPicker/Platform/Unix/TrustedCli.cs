@@ -4,8 +4,8 @@ using System.Runtime.InteropServices;
 namespace BwPicker;
 
 /// <summary>
-/// Finds the Bitwarden CLI (bw) and checks it can only have been put there by root or this user. Linux builds of
-/// bw aren't code-signed, so instead of a signature check the executable and every folder above it must be owned
+/// Finds the Bitwarden CLI (bw) and checks it can only have been put there by root or this user. Linux and Homebrew
+/// builds of bw aren't code-signed, so instead of a signature check the executable and every folder above it must be owned
 /// by root or the current user and not writable by anyone else, as an attacker would need to replace it.
 /// </summary>
 sealed class TrustedCli : IDisposable
@@ -14,7 +14,7 @@ sealed class TrustedCli : IDisposable
     public string Path { get; }
     TrustedCli(FileStream file, string path) { this.file = file; Path = path; }
 
-    /// <summary>Where BwPicker's own installer puts bw.</summary>
+    /// <summary>Where BwPicker's own installer puts bw (~/.local/share on Linux, ~/Library/Application Support on macOS).</summary>
     internal static string ManagedPath => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BwPicker", "cli", "bw");
 
@@ -46,9 +46,14 @@ sealed class TrustedCli : IDisposable
         yield return ManagedPath;
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         yield return System.IO.Path.Combine(home, ".local", "bin", "bw");
+#if MACOS
+        yield return "/opt/homebrew/bin/bw"; // Homebrew on Apple silicon
+        yield return "/usr/local/bin/bw";    // Homebrew on Intel, npm
+#else
         yield return "/usr/local/bin/bw";
         yield return "/usr/bin/bw";
         yield return "/snap/bin/bw";
+#endif
         foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries))
             if (System.IO.Path.IsPathFullyQualified(directory)) yield return System.IO.Path.Combine(directory, "bw");
     }
@@ -128,6 +133,26 @@ sealed class TrustedCli : IDisposable
         }
     }
 
+#if MACOS
+    static unsafe bool Stat(string path, out uint owner, out uint group, out uint mode)
+    {
+        // Darwin's 64-bit-inode struct stat: st_mode (u16) at offset 4, st_uid at 16, st_gid at 20.
+        byte* buffer = stackalloc byte[256];
+        int result = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? stat(path, buffer) : stat64(path, buffer);
+        if (result != 0)
+        {
+            owner = group = mode = 0;
+            return false;
+        }
+        mode = *(ushort*)(buffer + 4);
+        owner = *(uint*)(buffer + 16);
+        group = *(uint*)(buffer + 20);
+        return true;
+    }
+
+    [DllImport("libc", SetLastError = true)] static extern unsafe int stat(string path, byte* buffer);
+    [DllImport("libc", EntryPoint = "stat$INODE64", SetLastError = true)] static extern unsafe int stat64(string path, byte* buffer);
+#else
     static unsafe bool Stat(string path, out uint owner, out uint group, out uint mode)
     {
         byte* buffer = stackalloc byte[256];
@@ -143,11 +168,13 @@ sealed class TrustedCli : IDisposable
         return true;
     }
 
+    [DllImport("libc", SetLastError = true)] static extern unsafe int statx(int dirfd, string path, int flags, uint mask, byte* buffer);
+#endif
+
     public void Dispose() => file.Dispose();
 
     [DllImport("libc", SetLastError = true)] static extern uint geteuid();
     [DllImport("libc", SetLastError = true)] static extern uint getegid();
-    [DllImport("libc", SetLastError = true)] static extern unsafe int statx(int dirfd, string path, int flags, uint mask, byte* buffer);
     [DllImport("libc", SetLastError = true)] static extern IntPtr realpath(string path, IntPtr resolved);
     [DllImport("libc")] static extern void free(IntPtr pointer);
     [DllImport("libc", SetLastError = true)] static extern IntPtr getpwuid(uint uid);
@@ -168,8 +195,13 @@ static class CliEnvironment
         foreach (string name in new[] { "HOME", "USER", "LOGNAME", "LANG", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "TMPDIR" })
             if (Environment.GetEnvironmentVariable(name) is { } value) psi.Environment[name] = value;
         psi.Environment["HOME"] = home;
+#if MACOS
+        // Fixed folders only: Homebrew's node (for an npm or Homebrew bw) and the system's.
+        psi.Environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
+#else
         // Fixed system folders only (snap's launcher and an npm install's node live there).
         psi.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin:/snap/bin";
+#endif
         psi.Environment["BW_NOINTERACTION"] = "true";
         psi.Environment["NODE_TLS_REJECT_UNAUTHORIZED"] = "1";
         if (Environment.GetEnvironmentVariable("BITWARDENCLI_APPDATA_DIR") is { Length: > 0 } profile)

@@ -21,7 +21,9 @@ sealed class AppSettings
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     internal static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BwPicker", "settings.json");
+        // macOS keeps app data in ~/Library/Application Support (.NET's LocalApplicationData there).
+        Environment.GetFolderPath(OperatingSystem.IsMacOS() ? Environment.SpecialFolder.LocalApplicationData : Environment.SpecialFolder.ApplicationData),
+        "BwPicker", "settings.json");
 
     public static AppSettings Load(string? path = null)
     {

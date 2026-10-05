@@ -251,6 +251,13 @@ static class Tests
 #if WINDOWS
         string[] accepted = ["BwPicker.exe", "libSkiaSharp.dll", "av_libglesv2.dll"];
         string[] refused = ["../evil.dll", "sub/evil.dll", "sub\\evil.dll", "C:evil.exe", "README.md", "Install-Admin.ps1", ".hidden.dll", ""];
+#elif MACOS
+        string[] accepted = ["BwPicker", "libSkiaSharp.dylib", "libAvaloniaNative.dylib"];
+        string[] refused = ["../evil.dylib", "sub/evil.dylib", "BwPicker.exe", "evil", "Info.plist", ".hidden.dylib", "libx.so", ""];
+        // Only the bundle's Contents/MacOS files update; the rest of the bundle (Info.plist, resources) stays.
+        Assert(Updater.AppEntryName("BwPicker.app/Contents/MacOS/BwPicker") == "BwPicker", "Bundle executable not found in the package");
+        Assert(Updater.AppEntryName("BwPicker.app/Contents/Info.plist") == null, "File outside Contents/MacOS taken from the package");
+        Assert(Updater.AppEntryName("BwPicker") == null, "Root-level file taken from a macOS package");
 #else
         string[] accepted = ["BwPicker", "libSkiaSharp.so", "libHarfBuzzSharp.so"];
         string[] refused = ["../evil.so", "sub/evil.so", "sub\\evil.so", "BwPicker.exe", "evil", "README.md", ".hidden.so", "BwPicker.sh", ""];

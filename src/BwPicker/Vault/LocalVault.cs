@@ -23,7 +23,9 @@ static class LocalVault
         get
         {
             if (Environment.GetEnvironmentVariable("BITWARDENCLI_APPDATA_DIR") is { Length: > 0 } custom) return Path.Combine(custom, "data.json");
-            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Bitwarden CLI");
+            // The CLI uses ~/.config (XDG_CONFIG_HOME) on Linux and ~/Library/Application Support on macOS.
+            string dir = Path.Combine(Environment.GetFolderPath(OperatingSystem.IsMacOS()
+                ? Environment.SpecialFolder.LocalApplicationData : Environment.SpecialFolder.ApplicationData), "Bitwarden CLI");
             // The snap package keeps its data inside the snap's own home folder.
             string snap = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "snap", "bw", "current", ".config", "Bitwarden CLI");
             if (OperatingSystem.IsLinux() && !Directory.Exists(dir) && Directory.Exists(snap)) dir = snap;

@@ -62,8 +62,8 @@ sealed class SettingsWindow : PanelWindow
         };
         autoUpdate.IsCheckedChanged += (_, _) => { settings.CheckForUpdates = autoUpdate.IsChecked == true; TrySave(); };
 
-        var keys = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center,
-            Children = { Ui.Keycap(P, "Ctrl"), Ui.Keycap(P, "Alt"), Ui.Keycap(P, "B") } };
+        var keys = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        foreach (string key in Shortcuts.HotkeyKeys) keys.Children.Add(Ui.Keycap(P, key));
 
         who = Ui.Text(preview ? "Preview" : "Checking…", 14, P.Text);
         where = Ui.Text("", 12.5, P.SubtleText);
