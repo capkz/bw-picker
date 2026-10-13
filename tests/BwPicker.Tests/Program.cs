@@ -212,6 +212,11 @@ static class Tests
             new AppSettings { CheckForUpdates = false, Welcomed = true }.Save(settingsPath);
             var loaded = AppSettings.Load(settingsPath);
             Assert(!loaded.CheckForUpdates && loaded.Welcomed, "Settings did not round-trip");
+            Assert(loaded.AutoLockAfter == TimeSpan.FromMinutes(15), "Auto-lock default is not 15 minutes");
+            Assert(new AppSettings { AutoLockMinutes = 0 }.AutoLockAfter == null, "Auto-lock 'never' is not honoured");
+            Assert(new AppSettings { AutoLockMinutes = -5 }.AutoLockAfter == TimeSpan.FromMinutes(15), "Negative auto-lock did not fall back");
+            new AppSettings { AutoLockMinutes = 60 }.Save(settingsPath);
+            Assert(AppSettings.Load(settingsPath).AutoLockAfter == TimeSpan.FromHours(1), "Auto-lock did not round-trip");
             File.WriteAllText(settingsPath, "{ not json");
             Assert(AppSettings.Load(settingsPath).CheckForUpdates, "Corrupt settings did not fall back to defaults");
         }

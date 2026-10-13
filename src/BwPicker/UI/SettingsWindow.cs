@@ -9,10 +9,11 @@ using Avalonia.Threading;
 
 namespace BwPicker;
 
-/// <summary>Startup, server/account and update settings.</summary>
+/// <summary>Startup, auto-lock, server/account and update settings.</summary>
 sealed class SettingsWindow : PanelWindow
 {
     static readonly string[] ServerOptions = ["bitwarden.com", "bitwarden.eu", "Self-hosted"];
+    static readonly int[] AutoLockOptions = [1, 5, 15, 30, 60, 240, 0];
 
     readonly BwClient bw;
     readonly AppSettings settings;
@@ -21,6 +22,7 @@ sealed class SettingsWindow : PanelWindow
     readonly bool preview;
 
     readonly ToggleSwitch startup, autoUpdate;
+    readonly ComboBox autoLock;
     readonly ToggleButton[] server;
     readonly TextBox serverUrl;
     readonly Button account, applyServer, updateAction;
@@ -61,6 +63,8 @@ sealed class SettingsWindow : PanelWindow
             setAdmin?.Invoke(admin.IsChecked == true);
         };
         autoUpdate.IsCheckedChanged += (_, _) => { settings.CheckForUpdates = autoUpdate.IsChecked == true; TrySave(); };
+
+        autoLock = AutoLockPicker();
 
         var keys = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center,
             Children = { Ui.Keycap(P, "Ctrl"), Ui.Keycap(P, "Alt"), Ui.Keycap(P, "B") } };
@@ -116,6 +120,7 @@ sealed class SettingsWindow : PanelWindow
                     Startup.AdminMode ? "As administrator, so it can type into admin apps" : "Open BwPicker in the tray when you sign in", startup),
                 AdminRow(),
                 Row("Shortcut", ShortcutHint, keys),
+                Row("Lock when idle", "Also locks right away when the screen locks, the computer sleeps or you sign out", autoLock),
                 Separator(),
                 Caption("ACCOUNT"),
                 Row(who, where, account),
@@ -166,6 +171,36 @@ sealed class SettingsWindow : PanelWindow
         Grid.SetColumn(right, 1); grid.Children.Add(right);
         return grid;
     }
+
+    ComboBox AutoLockPicker()
+    {
+        int[] minutes = AutoLockOptions.Contains(settings.AutoLockMinutes) || settings.AutoLockMinutes < 0
+            ? AutoLockOptions : [settings.AutoLockMinutes, .. AutoLockOptions]; // keep a hand-edited value selectable
+        int current = settings.AutoLockMinutes < 0 ? AppSettings.DefaultAutoLockMinutes : settings.AutoLockMinutes;
+        var box = new ComboBox
+        {
+            ItemsSource = minutes.Select(AutoLockLabel).ToArray(), SelectedIndex = Array.IndexOf(minutes, current),
+            MinWidth = 132, FontSize = 13, CornerRadius = new CornerRadius(6),
+            Background = Ui.Brush(P.Surface), BorderBrush = Ui.Brush(P.Border), Foreground = Ui.Brush(P.Text),
+        };
+        box.SelectionChanged += (_, _) =>
+        {
+            if (box.SelectedIndex < 0) return;
+            settings.AutoLockMinutes = minutes[box.SelectedIndex];
+            TrySave();
+        };
+        return box;
+    }
+
+    static string AutoLockLabel(int minutes) => minutes switch
+    {
+        0 => "Never",
+        1 => "After 1 minute",
+        < 60 => $"After {minutes} minutes",
+        60 => "After 1 hour",
+        _ when minutes % 60 == 0 => $"After {minutes / 60} hours",
+        _ => $"After {minutes} minutes",
+    };
 
     /// <summary>Shows the actual mode again, e.g. after the UAC prompt was declined.</summary>
     public void RefreshAdmin()

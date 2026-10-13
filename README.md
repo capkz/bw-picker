@@ -32,7 +32,7 @@ The Bitwarden browser extension only fills web pages. The desktop app's Autotype
 - **Sign in** with email, master password and a two-step code (authenticator, email or YubiKey), or with a personal API key.
 - **Updates itself** from GitHub Releases after checking the download's SHA-256 checksum. Checks daily; you can turn it off.
 - **Follows the system** light/dark mode.
-- **Locks automatically** after 15 minutes idle, and immediately when the screen locks, the computer sleeps or you sign out.
+- **Locks automatically** after 15 minutes idle (change it or turn it off in Settings), and immediately when the screen locks, the computer sleeps or you sign out.
 
 | Key | Action |
 |---|---|

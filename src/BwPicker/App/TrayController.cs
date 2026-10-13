@@ -6,7 +6,6 @@ namespace BwPicker;
 sealed class TrayController : IDisposable
 {
     const string HotkeyLabel = "Ctrl+Alt+B";
-    static readonly TimeSpan AutoLockAfter = TimeSpan.FromMinutes(15);
 
     readonly BwClient bw;
     readonly AppSettings settings = AppSettings.Load();
@@ -50,7 +49,7 @@ sealed class TrayController : IDisposable
         lockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
         lockTimer.Tick += async (_, _) =>
         {
-            if (bw.Unlocked && !busy && Environment.TickCount64 - lastUsed > AutoLockAfter.TotalMilliseconds) await Lock();
+            if (bw.Unlocked && !busy && settings.AutoLockAfter is { } after && Environment.TickCount64 - lastUsed > after.TotalMilliseconds) await Lock();
         };
         lockTimer.Start();
 

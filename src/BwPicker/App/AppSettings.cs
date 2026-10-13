@@ -9,6 +9,19 @@ sealed class AppSettings
     public DateTimeOffset? LastUpdateCheck { get; set; }
     public bool Welcomed { get; set; }
 
+    /// <summary>Lock the vault after this many idle minutes; 0 never locks on idle (screen lock, sleep and sign-out still do).</summary>
+    public int AutoLockMinutes { get; set; } = DefaultAutoLockMinutes;
+
+    internal const int DefaultAutoLockMinutes = 15;
+
+    /// <summary>The idle timeout, or null for never; negative values fall back to the default.</summary>
+    internal TimeSpan? AutoLockAfter => AutoLockMinutes switch
+    {
+        0 => null,
+        < 0 => TimeSpan.FromMinutes(DefaultAutoLockMinutes),
+        _ => TimeSpan.FromMinutes(AutoLockMinutes),
+    };
+
     /// <summary>Windows: run elevated from Program Files so typing reaches apps that run as administrator. On by default.</summary>
     public bool RunAsAdmin { get; set; } = true;
 
