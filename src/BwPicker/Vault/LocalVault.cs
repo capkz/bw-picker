@@ -58,7 +58,7 @@ static class LocalVault
 
         if (kdf.ValueKind != JsonValueKind.Object || salt == null || wrapped == null)
             throw new LocalVaultUnsupportedException("The local vault has no master password unlock data.");
-        if (!kdf.TryGetProperty("kdfType", out var type) || type.GetInt32() != 0)
+        if (!kdf.TryGetProperty("kdfType", out var type) || type.ValueKind != JsonValueKind.Number || !type.TryGetInt32(out int kdfType) || kdfType != 0)
             throw new LocalVaultUnsupportedException("Only PBKDF2 accounts unlock in-process.");
         if (!kdf.TryGetProperty("iterations", out var iterations) || !iterations.TryGetInt32(out int count))
             throw new LocalVaultUnsupportedException("The local vault has no KDF iteration count.");
@@ -113,7 +113,7 @@ static class LocalVault
     {
         if (Text(cipher, "organizationId") != null)
             throw new LocalVaultUnsupportedException("Organization items unlock through the CLI.");
-        if (!cipher.TryGetProperty("type", out var type) || type.GetInt32() != 1) return;
+        if (!cipher.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.Number || !type.TryGetInt32(out int itemType) || itemType != 1) return;
         if (Text(cipher, "deletedDate") != null) return; // in trash, like `bw list items`
         string id = Text(cipher, "id") ?? throw new LocalVaultUnsupportedException("A login has no id.");
         if (parsed.Credentials.ContainsKey(id) || parsed.Entries.Count >= 50_000)
@@ -188,6 +188,7 @@ static class LocalVault
             catch (JsonException) when (attempt < 3) { Thread.Sleep(100); }
             catch (JsonException) { throw new LocalVaultUnsupportedException("The local vault file couldn't be read."); }
             catch (InvalidOperationException) { throw new LocalVaultUnsupportedException("The local vault has an unexpected format."); }
+            catch (FormatException) { throw new LocalVaultUnsupportedException("The local vault has an unexpected format."); }
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }
     }

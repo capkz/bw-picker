@@ -148,6 +148,28 @@ static class Tests
                 await Throws(() => client.Unlock(password));
                 Assert(calls.Contains("unlock"), "Argon2/organization vault did not fall back to the CLI");
             }
+
+            // Numbers that aren't Int32 (a fraction, out of range, an exponent) are handled instead of crashing the unlock:
+            // a malformed KDF type falls back to the CLI, a malformed item type skips that item.
+            string valid = System.Text.Json.JsonSerializer.Serialize(State(ciphers));
+            foreach (string kdf in new[] { "1.5", "4294967296", "1e3" })
+            {
+                File.WriteAllText(vaultPath, valid.Replace("\"kdfType\":0", $"\"kdfType\":{kdf}"));
+                calls.Clear();
+                using var client = new BwClient((_, args) => { calls.Add(args[0]); return Task.FromResult((args[0] == "status" ? 0 : 1, """{"status":"locked"}""", "")); }, vaultPath);
+                using var password = new MemorySecret(katPassword.AsSpan());
+                await Throws(() => client.Unlock(password));
+                Assert(calls.Contains("unlock"), $"kdfType {kdf} did not fall back to the CLI");
+            }
+            foreach (string type in new[] { "1.5", "4294967296", "1e3" })
+            {
+                File.WriteAllText(vaultPath, valid.Replace("\"id\":\"a\",\"type\":1", $"\"id\":\"a\",\"type\":{type}"));
+                using var client = new BwClient((_, _) => Task.FromResult((1, "", "")), vaultPath);
+                using var password = new MemorySecret(katPassword.AsSpan());
+                await client.Unlock(password);
+                await client.Load(sync: false);
+                Assert(client.Entries.Select(e => e.Name).SequenceEqual(["Steam"]), $"Item type {type} wasn't skipped");
+            }
         }
         finally
         {
@@ -155,7 +177,7 @@ static class Tests
             System.Security.Cryptography.CryptographicOperations.ZeroMemory(stretched);
             System.Security.Cryptography.CryptographicOperations.ZeroMemory(katUserKey);
         }
-        Console.WriteLine("PASS: in-process unlock matches independent vectors; MAC/tamper/type checks; per-item keys, trash, CLI fallback, lock wipe.");
+        Console.WriteLine("PASS: in-process unlock matches independent vectors; MAC/tamper/type checks; per-item keys, trash, CLI fallback, malformed numbers, lock wipe.");
     }
 
     static async Task AccountChecks()
