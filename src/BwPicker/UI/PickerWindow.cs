@@ -150,7 +150,7 @@ sealed class PickerWindow : PanelWindow
     {
         string query = search.Text ?? "";
         var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        results.SetItems(ranked.Where(e => Matcher.MatchesQuery(e, words)), keepSelection ? results.SelectedEntry?.Id : null);
+        results.SetItems(ranked.Where(e => Matcher.MatchesQuery(e, words)), keepSelection);
         results.EmptyText = ranked.Count == 0 ? "Your vault has no logins yet" : $"No logins match “{query.Trim()}”";
         results.Height = results.Count == 0 ? 96 : Math.Min(results.Count, MaxVisibleRows) * ResultList.RowHeight + 20;
         count.Text = $"{results.Count} {(results.Count == 1 ? "LOGIN" : "LOGINS")}";

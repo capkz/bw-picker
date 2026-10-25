@@ -39,10 +39,16 @@ sealed class ResultList : UserControl
         Content = new Panel { Children = { scroller, empty } };
     }
 
-    public void SetItems(IEnumerable<Entry> entries, string? keepId = null)
+    /// <summary>
+    /// Replaces the rows. With <paramref name="keepSelection"/> the selection never moves to a different login:
+    /// if the selected one is gone, nothing is selected until the user picks a row or changes the query.
+    /// </summary>
+    public void SetItems(IEnumerable<Entry> entries, bool keepSelection = false)
     {
+        string? keepId = keepSelection ? SelectedEntry?.Id : null;
+        bool cleared = keepSelection && keepId == null && items.Count > 0;
         items = entries.Take(MaxRows).ToList();
-        selected = items.Count == 0 ? -1 : Math.Max(0, keepId == null ? 0 : items.FindIndex(e => e.Id == keepId));
+        selected = items.Count == 0 || cleared ? -1 : keepId == null ? 0 : items.FindIndex(e => e.Id == keepId);
         rows.Children.Clear();
         for (int i = 0; i < items.Count; i++) rows.Children.Add(BuildRow(items[i], i));
         empty.IsVisible = items.Count == 0;

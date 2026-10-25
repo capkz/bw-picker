@@ -34,10 +34,48 @@ static class Tests
             AccountChecks().GetAwaiter().GetResult();
             LocalVaultChecks().GetAwaiter().GetResult();
             UpdateChecks();
+            ResultSelectionChecks();
             Console.WriteLine("PASS: all regression checks.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    static bool uiReady;
+
+    /// <summary>
+    /// Initializes Avalonia once, without showing a window, registering a hotkey or starting a CLI.
+    /// False on Linux without a display (CI), where UI checks are skipped.
+    /// </summary>
+    static bool EnsureUi()
+    {
+        if (uiReady) return true;
+        if (!OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("DISPLAY") is null
+            && Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") is null) return false;
+        BwPicker.Program.BuildAvaloniaApp().SetupWithoutStarting();
+        return uiReady = true;
+    }
+
+    static void ResultSelectionChecks()
+    {
+        if (!EnsureUi()) { Console.WriteLine("SKIP: result selection checks (no display)."); return; }
+        // A background sync refreshes the open picker; Enter must never type a login the user didn't select.
+        var list = new ResultList(Palette.Current);
+        Entry discord = new("a", "Discord", "you@example.com", []), github = new("b", "GitHub", "octocat", []), steam = new("c", "Steam", "gamer", []);
+        list.SetItems([discord, github, steam]);
+        Assert(list.SelectedEntry?.Id == "a", "A new list doesn't select the first login");
+        list.MoveSelection(1);
+        list.SetItems([steam, github, discord], keepSelection: true);
+        Assert(list.SelectedEntry?.Id == "b", "A refresh lost the selected login after reordering");
+        list.SetItems([discord, steam], keepSelection: true);
+        Assert(list.SelectedEntry == null, "The selected login disappeared and another one was selected in its place");
+        list.SetItems([discord, steam, github], keepSelection: true);
+        Assert(list.SelectedEntry == null, "A later refresh selected a login after the selection was cleared");
+        list.MoveSelection(1);
+        Assert(list.SelectedEntry?.Id == "a", "Arrow keys don't select again after the selection was cleared");
+        list.SetItems([steam, discord]);
+        Assert(list.SelectedEntry?.Id == "c", "A new query doesn't select its first result");
+        Console.WriteLine("PASS: refreshed results keep the selected login and never move the selection to another one.");
     }
 
     static async Task LocalVaultChecks()
