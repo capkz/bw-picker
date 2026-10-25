@@ -36,9 +36,34 @@ sealed class SessionMonitor : IDisposable
         }
         if (await Connect(DBusAddress.Session) is { } user)
         {
+            // Any program on the session bus can send ActiveChanged. A "locked" signal only blocks (safe either way);
+            // an "unlocked" one is believed only if the screensaver service itself, asked directly, agrees.
             foreach (var (path, name) in new[] { ("/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver"), ("/org/gnome/ScreenSaver", "org.gnome.ScreenSaver") })
-                await Watch(user, null, path, name, "ActiveChanged", active => (active ? Locked : Unlocked)?.Invoke());
+                await Watch(user, null, path, name, "ActiveChanged", active =>
+                {
+                    if (active) Locked?.Invoke();
+                    else _ = ConfirmUnlocked(user, name, path);
+                });
         }
+    }
+
+    async Task ConfirmUnlocked(DBusConnection bus, string name, string path)
+    {
+        bool active;
+        try
+        {
+            active = await bus.CallMethodAsync(GetActive(bus, name, path), (Message m, object? _) => m.GetBodyReader().ReadBool(), null);
+        }
+        // A screensaver without GetActive can't be asked; trust its signal rather than leave BwPicker blocked.
+        catch (DBusExceptionBase) { active = false; }
+        if (!active && !disposed) Unlocked?.Invoke();
+    }
+
+    static MessageBuffer GetActive(DBusConnection bus, string name, string path)
+    {
+        using var writer = bus.GetMessageWriter();
+        writer.WriteMethodCallHeader(name, path, name, "GetActive");
+        return writer.CreateMessage();
     }
 
     static MessageBuffer SessionByPid(DBusConnection bus)
