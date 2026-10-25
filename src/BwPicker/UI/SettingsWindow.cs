@@ -105,6 +105,7 @@ sealed class SettingsWindow : PanelWindow
         updateAction.MinWidth = 132;
         updateAction.Click += async (_, _) =>
         {
+            if (preview) return; // a check saves settings, which would overwrite the real file with the preview's
             if (updater.Available != null) await updater.Install();
             else await updater.Check(manual: true);
         };
@@ -374,7 +375,7 @@ sealed class SettingsWindow : PanelWindow
     {
         updateAction.Content = updater.Available is { } release ? $"Install {release.Version.ToString(3)}" : "Check now";
         if (updater.Available != null) updateAction.Classes.Add("accent"); else updateAction.Classes.Remove("accent");
-        updateAction.IsEnabled = !updater.Busy;
+        updateAction.IsEnabled = !updater.Busy && !preview;
         versionStatus.Text = updater.Status.Length > 0 ? updater.Status
             : settings.LastUpdateCheck is { } last ? $"Last checked {last.LocalDateTime:g}" : "Not checked yet";
     }

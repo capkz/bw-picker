@@ -34,10 +34,43 @@ static class Tests
             AccountChecks().GetAwaiter().GetResult();
             LocalVaultChecks().GetAwaiter().GetResult();
             UpdateChecks();
+            PreviewSettingsChecks();
             Console.WriteLine("PASS: all regression checks.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    static bool uiReady;
+
+    /// <summary>
+    /// Initializes Avalonia once, without showing a window, registering a hotkey or starting a CLI.
+    /// False on Linux without a display (CI), where UI checks are skipped.
+    /// </summary>
+    static bool EnsureUi()
+    {
+        if (uiReady) return true;
+        if (!OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("DISPLAY") is null
+            && Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") is null) return false;
+        BwPicker.Program.BuildAvaloniaApp().SetupWithoutStarting();
+        return uiReady = true;
+    }
+
+    static void PreviewSettingsChecks()
+    {
+        if (!EnsureUi()) { Console.WriteLine("SKIP: settings preview checks (no display)."); return; }
+        // `--preview --settings`: "Check now" saves the updater's settings, which would replace the real settings.json.
+        var settings = new AppSettings { LastUpdateCheck = DateTimeOffset.Now.AddHours(-3) };
+        var window = new SettingsWindow(BwClient.Preview([]), settings, new Updater(settings), (_, _) => { },
+            new BwStatus("locked", "you@example.com", "https://vault.example.com"));
+        try
+        {
+            var check = Avalonia.LogicalTree.LogicalExtensions.GetLogicalDescendants(window)
+                .OfType<Avalonia.Controls.Button>().Single(b => b.Content as string == "Check now");
+            Assert(!check.IsEnabled, "The settings preview can check for updates, which saves over the real settings");
+        }
+        finally { window.Close(); }
+        Console.WriteLine("PASS: settings preview can't check for updates or save settings.");
     }
 
     static async Task LocalVaultChecks()
