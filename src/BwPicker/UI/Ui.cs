@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.VisualTree;
 
 namespace BwPicker;
 
@@ -78,10 +79,18 @@ class PanelWindow : Window
         RequestedThemeVariant = P.Dark ? ThemeVariant.Dark : ThemeVariant.Light;
         PointerPressed += (_, e) =>
         {
-            if (Draggable && e.Source is Panel or Border or TextBlock && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
+            if (Draggable && IsWindowDragSurface(e.Source) && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
                 BeginMoveDrag(e);
         };
     }
+
+    /// <summary>
+    /// Empty space only: a dropdown's or button's own template is made of borders and text too, and starting a drag
+    /// there captures the pointer, so a left click never opens the dropdown.
+    /// </summary>
+    internal static bool IsWindowDragSurface(object? source) => source is Control control && (source is Panel or Border or TextBlock) &&
+        !control.GetVisualAncestors().Prepend(control).TakeWhile(parent => parent is not Window)
+            .Any(parent => parent is Button or TextBox or SelectingItemsControl or ToggleSwitch or RangeBase);
 
     /// <summary>Whether dragging empty space moves the window; off for notifications, which close on click.</summary>
     protected bool Draggable { get; set; } = true;

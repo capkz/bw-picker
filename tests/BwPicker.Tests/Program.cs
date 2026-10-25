@@ -34,10 +34,57 @@ static class Tests
             AccountChecks().GetAwaiter().GetResult();
             LocalVaultChecks().GetAwaiter().GetResult();
             UpdateChecks();
+            WindowDragChecks();
             Console.WriteLine("PASS: all regression checks.");
             return 0;
         }
         catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+    }
+
+    static bool uiReady;
+
+    /// <summary>
+    /// Initializes Avalonia once, without showing a window, registering a hotkey or starting a CLI.
+    /// False on Linux without a display (CI), where UI checks are skipped.
+    /// </summary>
+    static bool EnsureUi()
+    {
+        if (uiReady) return true;
+        if (!OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("DISPLAY") is null
+            && Environment.GetEnvironmentVariable("WAYLAND_DISPLAY") is null) return false;
+        BwPicker.Program.BuildAvaloniaApp().SetupWithoutStarting();
+        return uiReady = true;
+    }
+
+    static void WindowDragChecks()
+    {
+        if (!EnsureUi()) { Console.WriteLine("SKIP: window drag checks (no display)."); return; }
+        // A left click on a dropdown lands on its template's border or text; that must not start a window drag.
+        var combo = new Avalonia.Controls.ComboBox { ItemsSource = new[] { "First", "Second" }, SelectedIndex = 0 };
+        combo.Template = new Avalonia.Controls.Templates.FuncControlTemplate<Avalonia.Controls.ComboBox>((_, scope) =>
+        {
+            var popup = new Avalonia.Controls.Primitives.Popup { Name = "PART_Popup" };
+            scope.Register("PART_Popup", popup);
+            return new Avalonia.Controls.Grid
+            {
+                Children = { new Avalonia.Controls.Border { Name = "Background", Child = new Avalonia.Controls.TextBlock { Text = "First" } }, popup },
+            };
+        });
+        combo.ApplyTemplate();
+        combo.Measure(new Avalonia.Size(360, 100)); combo.Arrange(new Avalonia.Rect(0, 0, 360, 40));
+        var parts = Avalonia.VisualTree.VisualExtensions.GetVisualDescendants(combo).ToArray();
+        Assert(parts.OfType<Avalonia.Controls.Border>().Any() && parts.OfType<Avalonia.Controls.TextBlock>().Any(), "Test dropdown template wasn't applied");
+        foreach (var part in parts.Where(v => v is Avalonia.Controls.Border or Avalonia.Controls.TextBlock))
+            Assert(!PanelWindow.IsWindowDragSurface(part), $"A dropdown's {part.GetType().Name} starts a window drag");
+
+        var border = new Avalonia.Controls.Border();
+        var button = new Avalonia.Controls.Button { Template = new Avalonia.Controls.Templates.FuncControlTemplate<Avalonia.Controls.Button>((_, _) => border) };
+        button.ApplyTemplate();
+        button.Measure(new Avalonia.Size(100, 50));
+        Assert(!PanelWindow.IsWindowDragSurface(border), "A button's template starts a window drag");
+        Assert(PanelWindow.IsWindowDragSurface(new Avalonia.Controls.TextBlock { Text = "Settings" }), "Window labels no longer move the window");
+        Assert(PanelWindow.IsWindowDragSurface(new Avalonia.Controls.StackPanel()), "Empty space no longer moves the window");
+        Console.WriteLine("PASS: dropdown and button templates don't start a window drag; labels and empty space still do.");
     }
 
     static async Task LocalVaultChecks()
